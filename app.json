@@ -22,6 +22,14 @@
       },
       "edgeToEdgeEnabled": true
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Cooley uses your location to show nearby jobs, center the live map, and fill your current address."
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }

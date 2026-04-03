@@ -1,16 +1,34 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { skillTags } from '../data/mockData';
-import { useApp } from '../context/AppContext';
-import { colors, radius, shadow, spacing } from '../theme';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AppButton from '../components/AppButton';
+import AppCard from '../components/AppCard';
+import useAppState from '../hooks/useAppState';
+import useScreenTopInset from '../hooks/useScreenTopInset';
+import { TAB_ROUTES } from '../navigation/routes';
+import { skillTags } from '../services/profileService';
+import { colors, radius, spacing } from '../utils/theme';
 
-export default function ProfileScreen() {
-  const { currentUser, jobs, logout } = useApp();
-  const activeJobs = jobs.filter((job) => job.status !== 'completed' && job.status !== 'cancelled');
+function formatStatus(status) {
+  return status
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+export default function ProfileScreen({ navigation }) {
+  const { currentUser, isListingsLoading, jobs, listingsNotice, logout, myListings } =
+    useAppState();
+  const topInset = useScreenTopInset(spacing.lg);
+  const activeJobs = jobs.filter(
+    (job) =>
+      job.createdBy === currentUser.id &&
+      job.status !== 'completed' &&
+      job.status !== 'cancelled'
+  );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.profileCard}>
+    <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
+      <AppCard style={styles.profileCard}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{currentUser.avatar}</Text>
         </View>
@@ -34,9 +52,9 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>Skills</Text>
           </View>
         </View>
-      </View>
+      </AppCard>
 
-      <View style={styles.card}>
+      <AppCard style={styles.card}>
         <Text style={styles.sectionTitle}>Listed skills</Text>
         <View style={styles.skillWrap}>
           {skillTags.map((skill) => (
@@ -45,98 +63,348 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
-      </View>
+      </AppCard>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Current activity</Text>
-        {activeJobs.slice(0, 3).map((job) => (
-          <View key={job.id} style={styles.activityRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.activityTitle}>{job.title}</Text>
-              <Text style={styles.activityMeta}>
-                {job.location} · {job.status}
-              </Text>
-            </View>
-            <Text style={styles.activityPrice}>${job.price}</Text>
+      <AppCard style={styles.card}>
+        <View style={styles.sectionHeadingRow}>
+          <Text style={styles.sectionTitle}>Your listings</Text>
+          <Text style={styles.sectionCount}>{myListings.length}</Text>
+        </View>
+
+        {isListingsLoading ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Loading your listings</Text>
+            <Text style={styles.emptyText}>
+              Pulling your latest job and rental posts from Supabase.
+            </Text>
           </View>
-        ))}
-      </View>
+        ) : listingsNotice ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Could not load your listings</Text>
+            <Text style={styles.emptyText}>{listingsNotice}</Text>
+          </View>
+        ) : myListings.length ? (
+          myListings.map((listing) => (
+            <Pressable
+              key={listing.id}
+              onPress={() =>
+                navigation.navigate(TAB_ROUTES.POST_JOB, {
+                  editListingId: listing.id,
+                })
+              }
+              style={styles.listingRow}
+            >
+              <View style={styles.listingMainRow}>
+                {listing.coverImageUrl ? (
+                  <Image source={{ uri: listing.coverImageUrl }} style={styles.listingThumb} />
+                ) : null}
+                <View style={styles.flexOne}>
+                  <View style={styles.listingHeaderRow}>
+                    <View
+                      style={[
+                        styles.listingTypePill,
+                        listing.type === 'rental' && styles.listingTypePillAlt,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.listingTypeText,
+                          listing.type === 'rental' && styles.listingTypeTextAlt,
+                        ]}
+                      >
+                        {listing.type === 'job' ? 'Job' : 'Rental'}
+                      </Text>
+                    </View>
+                    <Text style={styles.listingStatus}>{formatStatus(listing.status)}</Text>
+                  </View>
+                  <Text style={styles.listingTitle}>{listing.title}</Text>
+                  <Text style={styles.listingMeta}>
+                    {listing.category} - {listing.location}
+                  </Text>
+                  <View style={styles.listingFooterRow}>
+                    <Text style={styles.listingMeta}>{listing.detail}</Text>
+                    <View style={styles.listingFooterRight}>
+                      <Text style={styles.listingEdit}>Edit</Text>
+                      <Text style={styles.listingPrice}>${listing.price}</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </Pressable>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No listings yet</Text>
+            <Text style={styles.emptyText}>
+              Your job and rental posts will appear here after you publish them.
+            </Text>
+          </View>
+        )}
+      </AppCard>
 
-      <Pressable style={styles.logoutButton} onPress={logout}>
-        <Text style={styles.logoutButtonText}>Log out</Text>
-      </Pressable>
+      <AppCard style={styles.card}>
+        <Text style={styles.sectionTitle}>Current activity</Text>
+        {isListingsLoading ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Loading current activity</Text>
+            <Text style={styles.emptyText}>
+              Active jobs will appear here as soon as your listings finish loading.
+            </Text>
+          </View>
+        ) : listingsNotice ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Current activity is unavailable</Text>
+            <Text style={styles.emptyText}>{listingsNotice}</Text>
+          </View>
+        ) : activeJobs.length ? (
+          activeJobs.slice(0, 3).map((job) => (
+            <View key={job.id} style={styles.activityRow}>
+              <View style={styles.flexOne}>
+                <Text style={styles.activityTitle}>{job.title}</Text>
+                <Text style={styles.activityMeta}>
+                  {job.location} - {formatStatus(job.status)}
+                </Text>
+              </View>
+              <Text style={styles.activityPrice}>${job.price}</Text>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No active posts</Text>
+            <Text style={styles.emptyText}>
+              Any job you publish and keep live will show up here while it is still active.
+            </Text>
+          </View>
+        )}
+      </AppCard>
+
+      <AppButton label="Log out" onPress={logout} variant="ghost" />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingTop: spacing.xxl, gap: spacing.lg },
+  container: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  content: {
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   profileCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
     alignItems: 'center',
     gap: spacing.sm,
-    ...shadow,
+    padding: spacing.xl,
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.primarySoft,
     alignItems: 'center',
+    backgroundColor: colors.primarySoft,
+    borderRadius: 44,
+    height: 88,
     justifyContent: 'center',
+    width: 88,
   },
-  avatarText: { color: colors.primary, fontSize: 26, fontWeight: '800' },
-  name: { color: colors.text, fontSize: 24, fontWeight: '800' },
+  avatarText: {
+    color: colors.primary,
+    fontSize: 26,
+    fontWeight: '800',
+  },
+  name: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: '800',
+  },
   badge: {
     backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: radius.pill,
   },
-  badgeText: { color: colors.primary, fontWeight: '700', fontSize: 12 },
-  bio: { color: colors.secondaryText, fontSize: 14, lineHeight: 21, textAlign: 'center' },
-  statRow: { flexDirection: 'row', gap: spacing.md, marginTop: 6 },
-  statItem: { minWidth: 78, alignItems: 'center' },
-  statValue: { color: colors.text, fontSize: 20, fontWeight: '800' },
-  statLabel: { color: colors.subtleText, fontSize: 12, marginTop: 4 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+  badgeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  bio: {
+    color: colors.secondaryText,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  statRow: {
+    flexDirection: 'row',
     gap: spacing.md,
-    ...shadow,
+    marginTop: 6,
   },
-  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '800' },
-  skillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  statItem: {
+    alignItems: 'center',
+    minWidth: 78,
+  },
+  statValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  statLabel: {
+    color: colors.subtleText,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  card: {
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sectionHeadingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  sectionCount: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  skillWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   skillPill: {
     backgroundColor: colors.background,
-    borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.pill,
+    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  skillText: { color: colors.secondaryText, fontWeight: '700', fontSize: 13 },
-  activityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
+  skillText: {
+    color: colors.secondaryText,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  listingRow: {
     backgroundColor: colors.background,
+    borderColor: colors.border,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
     padding: spacing.md,
   },
-  activityTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: 5 },
-  activityMeta: { color: colors.secondaryText, fontSize: 12 },
-  activityPrice: { color: colors.text, fontSize: 18, fontWeight: '800' },
-  logoutButton: { alignItems: 'center', paddingVertical: 14 },
-  logoutButtonText: { color: colors.danger, fontWeight: '700', fontSize: 15 },
+  listingMainRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  listingHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  listingThumb: {
+    borderRadius: radius.md,
+    height: 84,
+    width: 84,
+  },
+  listingTypePill: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  listingTypePillAlt: {
+    backgroundColor: '#F1F5FF',
+  },
+  listingTypeText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  listingTypeTextAlt: {
+    color: '#4566C9',
+  },
+  listingStatus: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  listingTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  listingMeta: {
+    color: colors.secondaryText,
+    fontSize: 13,
+  },
+  listingFooterRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  listingFooterRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  listingEdit: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  listingPrice: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  activityRow: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  flexOne: {
+    flex: 1,
+  },
+  activityTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 5,
+  },
+  activityMeta: {
+    color: colors.secondaryText,
+    fontSize: 12,
+  },
+  activityPrice: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  emptyState: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 6,
+    padding: spacing.md,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptyText: {
+    color: colors.secondaryText,
+    fontSize: 13,
+    lineHeight: 19,
+  },
 });

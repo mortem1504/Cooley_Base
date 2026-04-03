@@ -1,170 +1,339 @@
-import React from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useApp } from '../context/AppContext';
-import { colors, radius, shadow, spacing } from '../theme';
+import MapView, { Marker } from 'react-native-maps';
+import AppButton from '../components/AppButton';
+import AppCard from '../components/AppCard';
+import MapJobRow from '../components/MapJobRow';
+import useAppState from '../hooks/useAppState';
+import { DISCOVER_ROUTES, ROOT_ROUTES } from '../navigation/routes';
+import { buildMapRegion, isValidCoordinate } from '../services/locationService';
+import { colors, radius, spacing } from '../utils/theme';
+import { formatJobPrice } from '../utils/jobFormatters';
 
 export default function MapBrowseScreen({ navigation }) {
-  const { filteredJobs, filters, setFilters } = useApp();
+  const {
+    filteredJobs,
+    filters,
+    isListingsLoading,
+    isLocationLoading,
+    listingsNotice,
+    locationNotice,
+    resetFilters,
+    refreshViewerLocation,
+    setFilters,
+    viewerLocation,
+  } = useAppState();
+  const mapRef = useRef(null);
+  const mappableJobs = useMemo(
+    () =>
+      filteredJobs.filter(
+        (job) => isValidCoordinate(job.latitude) && isValidCoordinate(job.longitude)
+      ),
+    [filteredJobs]
+  );
+  const mapRegion = useMemo(
+    () =>
+      buildMapRegion({
+        jobs: mappableJobs,
+        viewerLocation,
+      }),
+    [mappableJobs, viewerLocation]
+  );
+  const hasActiveFilters =
+    Boolean(filters.search) ||
+    filters.category !== 'All' ||
+    filters.maxPrice < 500 ||
+    filters.maxDistance < 25;
+
+  useEffect(() => {
+    if (!mapRef.current || !mapRegion) {
+      return;
+    }
+
+    mapRef.current.animateToRegion(mapRegion, 450);
+  }, [mapRegion]);
+
+  const handleRecenter = async () => {
+    try {
+      const nextLocation = await refreshViewerLocation();
+      const nextRegion = buildMapRegion({
+        jobs: mappableJobs,
+        viewerLocation: nextLocation,
+      });
+
+      mapRef.current?.animateToRegion(nextRegion, 450);
+    } catch (_error) {
+      // The location notice is already handled in shared state.
+    }
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={styles.content} style={styles.container}>
       <View style={styles.topRow}>
         <Pressable
-          style={styles.filterPill}
           onPress={() =>
             setFilters((prev) => ({
               ...prev,
-              maxDistance: prev.maxDistance === 3 ? 1.5 : 3,
+              maxDistance: prev.maxDistance === 25 ? 5 : 25,
             }))
           }
+          style={styles.filterPressable}
         >
-          <Text style={styles.filterPillText}>Distance {filters.maxDistance} km</Text>
+          <AppCard style={styles.filterCard}>
+            <Text style={styles.filterLabel}>Distance {filters.maxDistance} km</Text>
+          </AppCard>
         </Pressable>
         <Pressable
-          style={styles.filterPill}
           onPress={() =>
             setFilters((prev) => ({
               ...prev,
-              maxPrice: prev.maxPrice === 50 ? 25 : 50,
+              maxPrice: prev.maxPrice === 500 ? 100 : 500,
             }))
           }
+          style={styles.filterPressable}
         >
-          <Text style={styles.filterPillText}>Price up to ${filters.maxPrice}</Text>
+          <AppCard style={styles.filterCard}>
+            <Text style={styles.filterLabel}>Price up to ${filters.maxPrice}</Text>
+          </AppCard>
         </Pressable>
       </View>
 
-      <View style={styles.mapCard}>
-        <Text style={styles.mapLabel}>Campus map</Text>
-        <Text style={styles.mapHint}>Tap a green pin to open the job.</Text>
-        <View style={styles.mapSurface}>
-          <View style={styles.mapRoadHorizontal} />
-          <View style={styles.mapRoadVertical} />
-          {filteredJobs.map((job) => (
-            <Pressable
-              key={job.id}
-              style={[styles.pinWrap, job.coordinates]}
-              onPress={() => navigation.navigate('JobDetail', { jobId: job.id })}
-            >
-              <View style={styles.pin}>
-                <Text style={styles.pinPrice}>${job.price}</Text>
-              </View>
-            </Pressable>
-          ))}
+      <AppCard style={styles.mapCard}>
+        <View style={styles.mapHeader}>
+          <View style={styles.mapCopy}>
+            <Text style={styles.mapLabel}>Live map</Text>
+            <Text style={styles.mapHint}>Tap a blue pin to open the job.</Text>
+          </View>
+          <Pressable onPress={handleRecenter} style={styles.recenterChip}>
+            <Text style={styles.recenterChipText}>
+              {isLocationLoading ? 'Locating...' : 'Near me'}
+            </Text>
+          </Pressable>
         </View>
-      </View>
+        <View style={styles.mapSurface}>
+          <MapView
+            initialRegion={mapRegion}
+            ref={mapRef}
+            showsMyLocationButton={false}
+            showsUserLocation={Boolean(viewerLocation)}
+            style={StyleSheet.absoluteFillObject}
+            toolbarEnabled={false}
+          >
+            {mappableJobs.map((job) => (
+              <Marker
+                coordinate={{
+                  latitude: Number(job.latitude),
+                  longitude: Number(job.longitude),
+                }}
+                key={job.id}
+                onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: job.id })}
+                title={job.title}
+              >
+                <View style={styles.markerBubble}>
+                  <Text style={styles.markerPrice}>{formatJobPrice(job.price)}</Text>
+                </View>
+              </Marker>
+            ))}
+          </MapView>
 
-      <View style={styles.bottomCard}>
+          {locationNotice ? (
+            <View style={styles.mapNotice}>
+              <Text style={styles.mapNoticeText}>{locationNotice}</Text>
+            </View>
+          ) : null}
+
+          {!mappableJobs.length ? (
+            <View style={styles.mapEmptyState}>
+              <Text style={styles.mapEmptyTitle}>No exact-address jobs yet</Text>
+              <Text style={styles.mapEmptyText}>
+                New posts with real addresses will appear here automatically.
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </AppCard>
+
+      <AppCard style={styles.bottomCard}>
         <View style={styles.bottomHeader}>
           <Text style={styles.sectionTitle}>Pinned nearby jobs</Text>
-          <Pressable onPress={() => navigation.navigate('ListBrowse')}>
+          <Pressable onPress={() => navigation.navigate(DISCOVER_ROUTES.LIST)}>
             <Text style={styles.linkText}>Switch to list</Text>
           </Pressable>
         </View>
-
-        {filteredJobs.map((job) => (
-          <Pressable
-            key={job.id}
-            style={styles.jobRow}
-            onPress={() => navigation.navigate('JobDetail', { jobId: job.id })}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.jobTitle}>{job.title}</Text>
-              <Text style={styles.jobMeta}>
-                {job.location} · {job.distance} km · {job.time}
-              </Text>
-            </View>
-            <Text style={styles.jobPrice}>${job.price}</Text>
-          </Pressable>
-        ))}
-      </View>
+        {isListingsLoading ? (
+          <Text style={styles.messageText}>Loading map listings...</Text>
+        ) : listingsNotice ? (
+          <Text style={styles.messageText}>{listingsNotice}</Text>
+        ) : filteredJobs.length ? (
+          filteredJobs.map((job) => (
+            <MapJobRow
+              job={job}
+              key={job.id}
+              onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: job.id })}
+            />
+          ))
+        ) : (
+          <>
+            <Text style={styles.messageText}>No jobs are available for this map view yet.</Text>
+            {hasActiveFilters ? (
+              <AppButton
+                label="Reset filters"
+                onPress={resetFilters}
+                style={styles.resetButton}
+                variant="secondary"
+              />
+            ) : null}
+          </>
+        )}
+      </AppCard>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, gap: spacing.lg },
-  topRow: { flexDirection: 'row', gap: spacing.sm },
-  filterPill: {
+  container: {
+    backgroundColor: colors.background,
     flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 12,
-    alignItems: 'center',
   },
-  filterPillText: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  mapCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+  content: {
+    gap: spacing.lg,
     padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.sm,
-    ...shadow,
   },
-  mapLabel: { fontSize: 22, fontWeight: '800', color: colors.text },
-  mapHint: { color: colors.secondaryText, fontSize: 13 },
+  topRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  filterPressable: {
+    flex: 1,
+  },
+  filterCard: {
+    alignItems: 'center',
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+  },
+  filterLabel: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  mapCard: {
+    gap: spacing.sm,
+    padding: spacing.lg,
+  },
+  mapHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  mapCopy: {
+    flex: 1,
+  },
+  mapLabel: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  mapHint: {
+    color: colors.secondaryText,
+    fontSize: 13,
+  },
   mapSurface: {
-    height: 360,
-    borderRadius: radius.lg,
-    marginTop: spacing.sm,
     backgroundColor: colors.mapBase,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    height: 360,
+    marginTop: spacing.sm,
     overflow: 'hidden',
     position: 'relative',
   },
-  mapRoadHorizontal: {
+  mapEmptyState: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.86)',
+    borderRadius: radius.md,
+    left: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     position: 'absolute',
-    top: '48%',
-    left: -20,
-    right: -20,
-    height: 18,
-    backgroundColor: '#DEE4D4',
-    transform: [{ rotate: '-8deg' }],
+    right: spacing.lg,
+    top: spacing.lg,
   },
-  mapRoadVertical: {
-    position: 'absolute',
-    top: -12,
-    bottom: -12,
-    left: '47%',
-    width: 18,
-    backgroundColor: '#DEE4D4',
-    transform: [{ rotate: '8deg' }],
+  mapEmptyTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
   },
-  pinWrap: { position: 'absolute' },
-  pin: {
-    backgroundColor: colors.primary,
+  mapEmptyText: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  mapNotice: {
+    backgroundColor: 'rgba(12, 24, 44, 0.72)',
+    borderRadius: radius.md,
+    bottom: spacing.md,
+    left: spacing.md,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    position: 'absolute',
+    right: spacing.md,
+  },
+  mapNoticeText: {
+    color: colors.card,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  markerBubble: {
+    backgroundColor: colors.primary,
+    borderColor: colors.card,
     borderRadius: radius.pill,
-    borderBottomLeftRadius: 8,
-    ...shadow,
+    borderWidth: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  pinPrice: { color: colors.card, fontWeight: '800', fontSize: 12 },
+  markerPrice: {
+    color: colors.card,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  recenterChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  recenterChipText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
   bottomCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    gap: spacing.md,
     padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.md,
-    ...shadow,
   },
-  bottomHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '800' },
-  linkText: { color: colors.primary, fontWeight: '700' },
-  jobRow: {
-    flexDirection: 'row',
+  bottomHeader: {
     alignItems: 'center',
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    backgroundColor: colors.background,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  jobTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  jobMeta: { color: colors.secondaryText, fontSize: 12 },
-  jobPrice: { color: colors.text, fontSize: 18, fontWeight: '800' },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  linkText: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  messageText: {
+    color: colors.secondaryText,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  resetButton: {
+    marginTop: spacing.sm,
+  },
 });
