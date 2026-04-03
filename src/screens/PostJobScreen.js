@@ -1,220 +1,949 @@
-import React, { useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AppButton from '../components/AppButton';
+import AppCard from '../components/AppCard';
+import AppTextInput from '../components/AppTextInput';
+import useAppState from '../hooks/useAppState';
+import useScreenTopInset from '../hooks/useScreenTopInset';
+import { TAB_ROUTES } from '../navigation/routes';
+import { resolveAddressFromInput } from '../services/locationService';
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { categories } from '../data/mockData';
-import { useApp } from '../context/AppContext';
-import { colors, radius, shadow, spacing } from '../theme';
+  buildPostFormFromListing,
+  buildInitialPostForm,
+  jobPostCategories,
+  normalizePickedPhoto,
+  postTypeOptions,
+  rentalPostCategories,
+} from '../services/postService';
+import { colors, radius, shadow } from '../utils/theme';
 
-export default function PostJobScreen({ navigation }) {
-  const { postJob } = useApp();
-  const [form, setForm] = useState({
-    title: 'Library runner to return borrowed camera',
-    description:
-      'Need someone to return a borrowed camera kit to the media desk before it closes.',
-    price: '22',
-    location: 'Media Center',
-    date: 'Today',
-    time: '6:10 PM',
-    category: 'Runner',
-    instantAccept: true,
+function PostTypeCard({ option, onPress }) {
+  return (
+    <Pressable onPress={onPress}>
+      <AppCard style={styles.typeCard}>
+        <View style={[styles.typeIconWrap, { backgroundColor: option.accentSoft }]}>
+          <Text style={[styles.typeIconText, { color: option.accent }]}>{option.badge}</Text>
+        </View>
+        <View style={styles.typeCopy}>
+          <Text style={styles.typeTitle}>{option.title}</Text>
+          <Text style={styles.typeSubtitle}>{option.subtitle}</Text>
+        </View>
+        <Text style={styles.typeArrow}>{'>'}</Text>
+      </AppCard>
+    </Pressable>
+  );
+}
+
+function PostTypeTab({ active, onPress, title }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.modeTab, active && styles.modeTabActive]}>
+      <Text style={[styles.modeTabText, active && styles.modeTabTextActive]}>{title}</Text>
+    </Pressable>
+  );
+}
+
+function CategoryChip({ active, label, onPress }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.categoryChip, active && styles.categoryChipActive]}>
+      <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function SectionLabel({ children }) {
+  return <Text style={styles.sectionLabel}>{children}</Text>;
+}
+
+function formatStatus(status) {
+  return String(status || '')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function CurrentListingCard({ listing, onPress }) {
+  return (
+    <Pressable onPress={onPress}>
+      <AppCard style={styles.currentListingCard}>
+        <View style={styles.currentListingHeader}>
+          <View
+            style={[
+              styles.currentListingTypePill,
+              listing.type === 'rental' && styles.currentListingTypePillAlt,
+            ]}
+          >
+            <Text
+              style={[
+                styles.currentListingTypeText,
+                listing.type === 'rental' && styles.currentListingTypeTextAlt,
+              ]}
+            >
+              {listing.type === 'job' ? 'Job' : 'Rental'}
+            </Text>
+          </View>
+          <Text style={styles.currentListingStatus}>{formatStatus(listing.status)}</Text>
+        </View>
+        <Text style={styles.currentListingTitle}>{listing.title}</Text>
+        <Text style={styles.currentListingMeta}>
+          {listing.category} - {listing.location}
+        </Text>
+        <View style={styles.currentListingFooter}>
+          <Text style={styles.currentListingPrice}>${listing.price}</Text>
+          <Text style={styles.currentListingAction}>Tap to edit</Text>
+        </View>
+      </AppCard>
+    </Pressable>
+  );
+}
+
+export default function PostJobScreen({ navigation, route }) {
+  const {
+    getListingForEdit,
+    isLocationLoading,
+    locationNotice,
+    myListings,
+    postJob,
+    postRental,
+    resetFilters,
+    refreshViewerLocation,
+    removeOwnedListing,
+    updateOwnedListing,
+    viewerLocation,
+  } = useAppState();
+  const topInset = useScreenTopInset(12);
+  const [selectedType, setSelectedType] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [forms, setForms] = useState({
+    job: buildInitialPostForm('job'),
+    rental: buildInitialPostForm('rental'),
   });
+  const editListingId = route?.params?.editListingId || null;
+  const editingListing = editListingId ? getListingForEdit(editListingId) : null;
+  const isEditing = Boolean(editingListing);
 
-  const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const activeForm = selectedType ? forms[selectedType] : null;
+  const activeCategories = selectedType === 'rental' ? rentalPostCategories : jobPostCategories;
+  const activeOption = postTypeOptions.find((option) => option.key === selectedType);
+  const canSubmit = !isSubmitting && Boolean(
+    activeForm &&
+      activeForm.title.trim() &&
+      activeForm.description.trim() &&
+      activeForm.budget.trim() &&
+      activeForm.duration.trim() &&
+      activeForm.location.trim()
+  );
 
-  const submit = () => {
-    if (!form.title || !form.description || !form.location) {
-      Alert.alert('Missing info', 'Please add a title, description, and location.');
+  useEffect(() => {
+    if (!editingListing) {
       return;
     }
 
-    const newJob = postJob(form);
-    Alert.alert('Job posted', 'Your quick job is live nearby.');
-    navigation.navigate('JobDetail', { jobId: newJob.id });
+    setSelectedType(editingListing.type);
+    setForms((prev) => ({
+      ...prev,
+      [editingListing.type]: buildPostFormFromListing(editingListing),
+    }));
+  }, [editingListing]);
+
+  const clearEditIntent = () => {
+    if (route?.params?.editListingId) {
+      navigation.setParams({ editListingId: undefined });
+    }
   };
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.headerCard}>
-        <Text style={styles.heading}>Post a quick job</Text>
-        <Text style={styles.subheading}>
-          Share the task, set a clear price, and let nearby students respond fast.
-        </Text>
-      </View>
+  const openListingEditor = (listingId) => {
+    const listing = getListingForEdit(listingId);
 
-      <View style={styles.formCard}>
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          value={form.title}
-          onChangeText={(value) => updateField('title', value)}
-          placeholder="Job title"
-          placeholderTextColor={colors.subtleText}
-          style={styles.input}
-        />
+    if (!listing) {
+      Alert.alert('Listing unavailable', 'We could not load this listing for editing.');
+      return;
+    }
 
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          value={form.description}
-          onChangeText={(value) => updateField('description', value)}
-          placeholder="Describe the task"
-          placeholderTextColor={colors.subtleText}
-          multiline
-          style={[styles.input, styles.textArea]}
-        />
+    navigation.setParams({ editListingId: listingId });
+    setSelectedType(listing.type);
+    setForms((prev) => ({
+      ...prev,
+      [listing.type]: buildPostFormFromListing(listing),
+    }));
+  };
 
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Price</Text>
-            <TextInput
-              value={form.price}
-              onChangeText={(value) => updateField('price', value)}
-              keyboardType="numeric"
-              placeholder="$0"
-              placeholderTextColor={colors.subtleText}
-              style={styles.input}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Category</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-              {categories.filter((item) => item !== 'All').map((category) => {
-                const selected = form.category === category;
-                return (
-                  <Pressable
-                    key={category}
-                    style={[styles.categoryChip, selected && styles.categoryChipActive]}
-                    onPress={() => updateField('category', category)}
-                  >
-                    <Text style={[styles.categoryText, selected && styles.categoryTextActive]}>
-                      {category}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+  const updateForm = (key, value) => {
+    setForms((prev) => ({
+      ...prev,
+      [selectedType]: {
+        ...prev[selectedType],
+        [key]: value,
+      },
+    }));
+  };
+
+  const updateLocationInput = (value) => {
+    setForms((prev) => ({
+      ...prev,
+      [selectedType]: {
+        ...prev[selectedType],
+        location: value,
+        locationDetails: null,
+      },
+    }));
+  };
+
+  const goBack = () => {
+    if (isEditing) {
+      clearEditIntent();
+      setSelectedType(null);
+      return;
+    }
+
+    if (selectedType) {
+      setSelectedType(null);
+      return;
+    }
+
+    navigation.navigate(TAB_ROUTES.DISCOVER);
+  };
+
+  const pickPhotos = async () => {
+    if (isEditing) {
+      Alert.alert('Photos stay the same for now', 'Edit the listing details below. Photo replacement can be added next.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: false,
+        allowsMultipleSelection: true,
+        base64: true,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+        selectionLimit: 4,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      updateForm(
+        'photos',
+        result.assets.map((asset, index) => normalizePickedPhoto(asset, index))
+      );
+    } catch (error) {
+      Alert.alert('Photo access failed', 'Please try selecting your photos again.');
+    }
+  };
+
+  const useCurrentAddress = async () => {
+    setIsResolvingLocation(true);
+
+    try {
+      const nextLocation = viewerLocation || (await refreshViewerLocation());
+
+      if (!nextLocation) {
+        throw new Error('We could not load your current address yet.');
+      }
+
+      setForms((prev) => ({
+        ...prev,
+        [selectedType]: {
+          ...prev[selectedType],
+          location: nextLocation.address,
+          locationDetails: nextLocation,
+        },
+      }));
+    } catch (error) {
+      Alert.alert('Location unavailable', error.message || 'Please enter an address manually.');
+    } finally {
+      setIsResolvingLocation(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!canSubmit) {
+      Alert.alert('Missing details', 'Please complete the form before reviewing your post.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const locationInput = activeForm.location.trim();
+      const hasResolvedLocation =
+        activeForm.locationDetails &&
+        activeForm.locationDetails.address &&
+        activeForm.locationDetails.address.toLowerCase() === locationInput.toLowerCase();
+      const resolvedLocation = hasResolvedLocation
+        ? activeForm.locationDetails
+        : await resolveAddressFromInput(locationInput);
+
+      if (isEditing && editingListing) {
+        await updateOwnedListing(editingListing.id, {
+          title: activeForm.title,
+          description: activeForm.description,
+          category: activeForm.category,
+          budget: activeForm.budget,
+          duration: activeForm.duration,
+          location: resolvedLocation.address,
+          latitude: resolvedLocation.latitude,
+          longitude: resolvedLocation.longitude,
+          price: activeForm.budget,
+          time: activeForm.duration,
+          urgent: activeForm.urgent,
+        });
+
+        Alert.alert('Listing updated', 'Your listing details are now live.');
+        clearEditIntent();
+        setForms((prev) => ({
+          ...prev,
+          [editingListing.type]: buildInitialPostForm(editingListing.type),
+        }));
+        setSelectedType(null);
+        return;
+      }
+
+      if (selectedType === 'job') {
+        const newJob = await postJob({
+          title: activeForm.title,
+          description: activeForm.description,
+          price: activeForm.budget,
+          location: resolvedLocation.address,
+          latitude: resolvedLocation.latitude,
+          longitude: resolvedLocation.longitude,
+          date: activeForm.urgent ? 'ASAP' : 'Flexible',
+          time: activeForm.duration,
+          category: activeForm.category,
+          instantAccept: activeForm.urgent,
+          photos: activeForm.photos,
+        });
+
+        resetFilters();
+        Alert.alert('Job posted', 'Your post is now live for nearby students.');
+        navigation.navigate('JobDetail', { jobId: newJob.id });
+        return;
+      }
+
+      await postRental({
+        ...activeForm,
+        location: resolvedLocation.address,
+        latitude: resolvedLocation.latitude,
+        longitude: resolvedLocation.longitude,
+      });
+      resetFilters();
+      Alert.alert('Rental listed', 'Your rental post is ready for nearby students to discover.');
+      setForms((prev) => ({ ...prev, rental: buildInitialPostForm('rental') }));
+      setSelectedType(null);
+    } catch (error) {
+      Alert.alert('Post failed', error.message || 'We could not publish your post right now.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmDeleteListing = () => {
+    if (!editingListing) {
+      return;
+    }
+
+    Alert.alert(
+      'Delete listing?',
+      'This will remove the listing from the marketplace for everyone.',
+      [
+        { style: 'cancel', text: 'Keep listing' },
+        {
+          style: 'destructive',
+          text: 'Delete',
+          onPress: async () => {
+            try {
+              await removeOwnedListing(editingListing.id);
+              clearEditIntent();
+              setForms((prev) => ({
+                ...prev,
+                [editingListing.type]: buildInitialPostForm(editingListing.type),
+              }));
+              setSelectedType(null);
+              Alert.alert('Listing deleted', 'Your post has been removed.');
+            } catch (error) {
+              Alert.alert(
+                'Delete failed',
+                error.message || 'We could not delete this listing right now.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  if (!selectedType) {
+    return (
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
+        <View style={styles.headerRow}>
+          <Pressable onPress={goBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>{'<'}</Text>
+          </Pressable>
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerTitle}>Create Post</Text>
+            <Text style={styles.headerSubtitle}>What do you want to post?</Text>
           </View>
         </View>
 
-        <Text style={styles.label}>Location</Text>
-        <TextInput
-          value={form.location}
-          onChangeText={(value) => updateField('location', value)}
-          placeholder="Pickup or task location"
-          placeholderTextColor={colors.subtleText}
-          style={styles.input}
-        />
-
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Date</Text>
-            <TextInput
-              value={form.date}
-              onChangeText={(value) => updateField('date', value)}
-              placeholder="Today"
-              placeholderTextColor={colors.subtleText}
-              style={styles.input}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Time</Text>
-            <TextInput
-              value={form.time}
-              onChangeText={(value) => updateField('time', value)}
-              placeholder="6:00 PM"
-              placeholderTextColor={colors.subtleText}
-              style={styles.input}
-            />
-          </View>
+        <View style={styles.typeCardColumn}>
+          {postTypeOptions.map((option) => (
+            <PostTypeCard key={option.key} onPress={() => setSelectedType(option.key)} option={option} />
+          ))}
         </View>
 
-        <View style={styles.toggleCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.toggleTitle}>Instant accept</Text>
-            <Text style={styles.toggleSubtitle}>
-              Turn this on for urgent tasks that can move straight into progress.
+        <AppCard style={styles.currentListingsSection}>
+          <View style={styles.currentListingsHeader}>
+            <Text style={styles.currentListingsTitle}>Your current listings</Text>
+            <Text style={styles.currentListingsCount}>{myListings.length}</Text>
+          </View>
+
+          {myListings.length ? (
+            <View style={styles.currentListingsColumn}>
+              {myListings.slice(0, 4).map((listing) => (
+                <CurrentListingCard
+                  key={listing.id}
+                  listing={listing}
+                  onPress={() => openListingEditor(listing.id)}
+                />
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.currentListingsEmpty}>
+              Your posted jobs and rentals will show up here with their current status.
             </Text>
+          )}
+        </AppCard>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
+      <View style={styles.headerRow}>
+        <Pressable onPress={goBack} style={styles.backButton}>
+          <Text style={styles.backButtonText}>{'<'}</Text>
+        </Pressable>
+        <View style={styles.headerCopy}>
+          <Text style={styles.headerTitle}>{isEditing ? `Edit ${activeOption.title}` : activeOption.title}</Text>
+          <Text style={styles.headerSubtitle}>
+            {isEditing ? 'Update your live listing details' : 'Fill in the details below'}
+          </Text>
+        </View>
+      </View>
+
+      {!isEditing ? (
+        <View style={styles.modeTabs}>
+          {postTypeOptions.map((option) => (
+            <PostTypeTab
+              active={selectedType === option.key}
+              key={option.key}
+              onPress={() => setSelectedType(option.key)}
+              title={option.title}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      <AppCard style={styles.photoCard}>
+        <Pressable disabled={isEditing} onPress={pickPhotos} style={styles.photoDropZone}>
+          {activeForm.photos.length ? (
+            <>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.photoRow}>
+                  {activeForm.photos.map((photo) => (
+                    <Image
+                      key={photo.id || photo.uri}
+                      source={{ uri: photo.uri }}
+                      style={styles.photoPreview}
+                    />
+                  ))}
+                </View>
+              </ScrollView>
+              <Text style={styles.photoHint}>
+                {isEditing
+                  ? `${activeForm.photos.length} current photo(s)`
+                  : `${activeForm.photos.length} photo(s) selected`}
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.photoIconWrap}>
+                <Text style={styles.photoIcon}>+</Text>
+              </View>
+              <Text style={styles.photoTitle}>{isEditing ? 'Current Photos' : 'Add Photos'}</Text>
+            </>
+          )}
+        </Pressable>
+        {isEditing ? (
+          <Text style={styles.photoEditNote}>
+            Photo replacement is not included in this edit flow yet. Your current images will stay as they are.
+          </Text>
+        ) : null}
+      </AppCard>
+
+      <AppCard style={styles.formSection}>
+        <SectionLabel>Title</SectionLabel>
+        <AppTextInput
+          onChangeText={(value) => updateForm('title', value)}
+          placeholder={
+            selectedType === 'job' ? 'e.g. Help move furniture' : 'e.g. Canon camera for rent'
+          }
+          style={styles.softInput}
+          value={activeForm.title}
+        />
+
+        <SectionLabel>Description</SectionLabel>
+        <AppTextInput
+          multiline
+          onChangeText={(value) => updateForm('description', value)}
+          placeholder={
+            selectedType === 'job'
+              ? 'Describe what you need...'
+              : 'Describe the item, condition, and what is included...'
+          }
+          style={[styles.softInput, styles.descriptionInput]}
+          value={activeForm.description}
+        />
+      </AppCard>
+
+      <AppCard style={styles.formSection}>
+        <SectionLabel>Category</SectionLabel>
+        <View style={styles.categoryWrap}>
+          {activeCategories.map((category) => (
+            <CategoryChip
+              active={activeForm.category === category}
+              key={category}
+              label={category}
+              onPress={() => updateForm('category', category)}
+            />
+          ))}
+        </View>
+      </AppCard>
+
+      <AppCard style={styles.formSection}>
+        <View style={styles.detailRow}>
+          <View style={styles.flexOne}>
+            <SectionLabel>{selectedType === 'job' ? 'Budget' : 'Rate'}</SectionLabel>
+            <AppTextInput
+              keyboardType="numeric"
+              onChangeText={(value) => updateForm('budget', value)}
+              placeholder="$0.00"
+              style={styles.softInput}
+              value={activeForm.budget}
+            />
           </View>
-          <Switch
-            trackColor={{ false: '#D8D4CB', true: '#8FD3B3' }}
-            thumbColor={colors.card}
-            value={form.instantAccept}
-            onValueChange={(value) => updateField('instantAccept', value)}
-          />
+          <View style={styles.flexOne}>
+            <SectionLabel>Duration</SectionLabel>
+            <AppTextInput
+              onChangeText={(value) => updateForm('duration', value)}
+              placeholder={selectedType === 'job' ? 'e.g. 2 hrs' : 'e.g. 3 days'}
+              style={styles.softInput}
+              value={activeForm.duration}
+            />
+          </View>
         </View>
 
-        <Pressable style={styles.primaryButton} onPress={submit}>
-          <Text style={styles.primaryButtonText}>Post job</Text>
+        <SectionLabel>Location</SectionLabel>
+        <AppTextInput
+          onChangeText={updateLocationInput}
+          placeholder={
+            selectedType === 'job'
+              ? 'e.g. 123 Main St, Los Angeles'
+              : 'e.g. 45 Oak Ave, Student Center'
+          }
+          style={styles.softInput}
+          value={activeForm.location}
+        />
+        <Text style={styles.locationHint}>
+          Enter a real street or campus address so nearby students can find this on the map.
+        </Text>
+
+        <Pressable
+          onPress={useCurrentAddress}
+          style={[
+            styles.toggleChip,
+            styles.locationChip,
+            (isResolvingLocation || isLocationLoading) && styles.toggleChipActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.toggleChipText,
+              (isResolvingLocation || isLocationLoading) && styles.toggleChipTextActive,
+            ]}
+          >
+            {isResolvingLocation || isLocationLoading ? 'Finding current address...' : 'Use current address'}
+          </Text>
         </Pressable>
-      </View>
+
+        {locationNotice ? <Text style={styles.locationNotice}>{locationNotice}</Text> : null}
+
+        <Pressable
+          onPress={() => updateForm('urgent', !activeForm.urgent)}
+          style={[styles.toggleChip, activeForm.urgent && styles.toggleChipActive]}
+        >
+          <Text style={[styles.toggleChipText, activeForm.urgent && styles.toggleChipTextActive]}>
+            {selectedType === 'job' ? 'Mark as Urgent' : 'Available Now'}
+          </Text>
+        </Pressable>
+      </AppCard>
+
+      <AppButton
+        disabled={!canSubmit}
+        label={isSubmitting ? (isEditing ? 'Saving...' : 'Publishing...') : isEditing ? 'Save Changes' : 'Review Post'}
+        onPress={submit}
+        style={[styles.reviewButton, !canSubmit && styles.reviewButtonDisabled]}
+        textStyle={!canSubmit ? styles.reviewButtonTextDisabled : null}
+      />
+
+      {isEditing ? (
+        <AppButton
+          label="Delete Listing"
+          onPress={confirmDeleteListing}
+          style={styles.deleteButton}
+          variant="ghost"
+        />
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingTop: spacing.xxl, gap: spacing.lg },
-  headerCard: { gap: spacing.sm },
-  heading: { color: colors.text, fontSize: 30, lineHeight: 36, fontWeight: '800' },
-  subheading: { color: colors.secondaryText, fontSize: 14, lineHeight: 21 },
-  formCard: {
+  container: {
+    backgroundColor: '#F4F7FD',
+    flex: 1,
+  },
+  content: {
+    gap: 16,
+    padding: 16,
+    paddingBottom: 32,
+  },
+  headerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  backButton: {
+    alignItems: 'center',
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.md,
+    borderRadius: 999,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
     ...shadow,
   },
-  label: { color: colors.text, fontSize: 13, fontWeight: '700', marginBottom: -6 },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
+  backButtonText: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: -1,
   },
-  textArea: { minHeight: 96, textAlignVertical: 'top' },
-  row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
-  categoryRow: { gap: spacing.xs, paddingVertical: 2 },
-  categoryChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: radius.pill,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
+  headerCopy: {
+    flex: 1,
   },
-  categoryChipActive: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
-  categoryText: { color: colors.secondaryText, fontWeight: '700', fontSize: 12 },
-  categoryTextActive: { color: colors.primary },
-  toggleCard: {
+  headerTitle: {
+    color: '#1C2434',
+    fontSize: 30,
+    fontWeight: '800',
+  },
+  headerSubtitle: {
+    color: '#7B8596',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  typeCardColumn: {
+    gap: 14,
+    marginTop: 8,
+  },
+  currentListingsSection: {
+    gap: 12,
+    padding: 18,
+  },
+  currentListingsHeader: {
+    alignItems: 'center',
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
+    justifyContent: 'space-between',
   },
-  toggleTitle: { color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  toggleSubtitle: { color: colors.secondaryText, fontSize: 13, lineHeight: 19 },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 6,
+  currentListingsTitle: {
+    color: '#1D2433',
+    fontSize: 18,
+    fontWeight: '800',
   },
-  primaryButtonText: { color: colors.card, fontSize: 15, fontWeight: '800' },
+  currentListingsCount: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  currentListingsColumn: {
+    gap: 12,
+  },
+  currentListingsEmpty: {
+    color: '#7B8596',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  currentListingCard: {
+    gap: 8,
+    padding: 16,
+  },
+  currentListingHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  currentListingTypePill: {
+    backgroundColor: '#EAF2FF',
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  currentListingTypePillAlt: {
+    backgroundColor: '#F1F5FF',
+  },
+  currentListingTypeText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  currentListingTypeTextAlt: {
+    color: '#4566C9',
+  },
+  currentListingStatus: {
+    color: '#7B8596',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  currentListingTitle: {
+    color: '#1D2433',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  currentListingMeta: {
+    color: '#7B8596',
+    fontSize: 13,
+  },
+  currentListingFooter: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  currentListingPrice: {
+    color: '#1D2433',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  currentListingAction: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  typeCard: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 16,
+    padding: 20,
+  },
+  typeIconWrap: {
+    alignItems: 'center',
+    borderRadius: 22,
+    height: 52,
+    justifyContent: 'center',
+    width: 52,
+  },
+  typeIconText: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  typeCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  typeTitle: {
+    color: '#1D2433',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  typeSubtitle: {
+    color: '#7B8596',
+    fontSize: 14,
+  },
+  typeArrow: {
+    color: '#7B8596',
+    fontSize: 26,
+    lineHeight: 28,
+  },
+  modeTabs: {
+    backgroundColor: '#E8EEF9',
+    borderRadius: radius.pill,
+    flexDirection: 'row',
+    padding: 4,
+  },
+  modeTab: {
+    alignItems: 'center',
+    borderRadius: radius.pill,
+    flex: 1,
+    paddingVertical: 12,
+  },
+  modeTabActive: {
+    backgroundColor: colors.card,
+  },
+  modeTabText: {
+    color: '#7B8596',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modeTabTextActive: {
+    color: '#1D2433',
+  },
+  photoCard: {
+    padding: 16,
+  },
+  photoDropZone: {
+    alignItems: 'center',
+    borderColor: '#D6E2F4',
+    borderRadius: 22,
+    borderStyle: 'dashed',
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    minHeight: 142,
+    padding: 16,
+  },
+  photoIconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 28,
+  },
+  photoIcon: {
+    color: '#7B8596',
+    fontSize: 28,
+    fontWeight: '400',
+  },
+  photoTitle: {
+    color: '#7B8596',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  photoHint: {
+    color: '#7B8596',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 12,
+  },
+  photoEditNote: {
+    color: '#7B8596',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 12,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  photoPreview: {
+    borderRadius: 16,
+    height: 82,
+    width: 82,
+  },
+  formSection: {
+    gap: 12,
+    padding: 20,
+  },
+  sectionLabel: {
+    color: '#243040',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  locationHint: {
+    color: '#7B8596',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -4,
+  },
+  locationNotice: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -4,
+  },
+  softInput: {
+    backgroundColor: '#E9EDF3',
+    borderWidth: 0,
+    color: '#243040',
+    paddingVertical: 14,
+  },
+  descriptionInput: {
+    minHeight: 112,
+    textAlignVertical: 'top',
+  },
+  categoryWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  categoryChip: {
+    backgroundColor: '#E9EDF3',
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  categoryChipActive: {
+    backgroundColor: '#EAF2FF',
+  },
+  categoryChipText: {
+    color: '#718096',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  categoryChipTextActive: {
+    color: colors.primary,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  flexOne: {
+    flex: 1,
+  },
+  toggleChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E9EDF3',
+    borderRadius: radius.pill,
+    marginTop: 2,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  toggleChipActive: {
+    backgroundColor: '#EAF2FF',
+  },
+  locationChip: {
+    marginTop: 0,
+  },
+  toggleChipText: {
+    color: '#718096',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  toggleChipTextActive: {
+    color: colors.primary,
+  },
+  reviewButton: {
+    backgroundColor: '#DCE7F8',
+    borderRadius: 22,
+    minHeight: 56,
+  },
+  reviewButtonDisabled: {
+    backgroundColor: '#DCE7F8',
+  },
+  reviewButtonTextDisabled: {
+    color: '#7B8596',
+  },
+  deleteButton: {
+    marginTop: -4,
+  },
 });

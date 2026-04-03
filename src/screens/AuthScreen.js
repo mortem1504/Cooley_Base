@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -6,42 +6,81 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
-import { useApp } from '../context/AppContext';
-import { colors, radius, shadow, spacing } from '../theme';
-
-const highlights = [
-  { label: 'Nearby jobs', value: 'Walkable student gigs around campus' },
-  { label: 'Fast trust', value: 'Verification badges and clear ratings' },
-  { label: 'Quick pay', value: 'Short jobs with simple pricing upfront' },
-];
+import AppButton from '../components/AppButton';
+import AppCard from '../components/AppCard';
+import AppTextInput from '../components/AppTextInput';
+import useAppState from '../hooks/useAppState';
+import useScreenTopInset from '../hooks/useScreenTopInset';
+import { authHighlights } from '../services/authService';
+import { colors, radius, spacing } from '../utils/theme';
 
 export default function AuthScreen() {
-  const { authMode, setAuthMode, login, signup } = useApp();
+  const { authMode, authNotice, isAuthLoading, setAuthMode, login, signup } = useAppState();
+  const topInset = useScreenTopInset(spacing.lg);
   const [name, setName] = useState('Minji Park');
   const [email, setEmail] = useState('minji@campus.edu');
   const [password, setPassword] = useState('password');
   const [bio, setBio] = useState('Reliable student for quick campus help and last-minute errands.');
+  const [feedback, setFeedback] = useState('');
+  const [feedbackTone, setFeedbackTone] = useState('muted');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isSignup = authMode === 'signup';
+  const buttonLabel = isSubmitting
+    ? isSignup
+      ? 'Creating account...'
+      : 'Signing in...'
+    : isSignup
+      ? 'Create account'
+      : 'Enter app';
 
-  const handleSubmit = () => {
-    if (isSignup) {
-      signup({ name, email, password, bio });
+  useEffect(() => {
+    if (!authNotice) {
       return;
     }
 
-    login({ name, email, password });
+    setFeedback(authNotice);
+    setFeedbackTone('error');
+  }, [authNotice]);
+
+  const handleSubmit = async () => {
+    setFeedback('');
+    setFeedbackTone('muted');
+    setIsSubmitting(true);
+
+    let result;
+
+    if (isSignup) {
+      result = await signup({ name, email, password, bio });
+    } else {
+      result = await login({ email, password });
+    }
+
+    setIsSubmitting(false);
+
+    if (!result?.ok) {
+      setFeedback(result?.error || 'Something went wrong while connecting your account.');
+      setFeedbackTone('error');
+      return;
+    }
+
+    if (result?.message) {
+      setFeedback(result.message);
+      setFeedbackTone('success');
+    }
   };
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: topInset }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.hero}>
           <Text style={styles.badge}>Student quick jobs</Text>
           <Text style={styles.title}>Fast local help, powered by nearby students.</Text>
@@ -51,26 +90,26 @@ export default function AuthScreen() {
           </Text>
         </View>
 
-        <View style={styles.highlightRow}>
-          {highlights.map((item) => (
-            <View key={item.label} style={styles.highlightCard}>
+        <View style={styles.highlightColumn}>
+          {authHighlights.map((item) => (
+            <AppCard key={item.label} style={styles.highlightCard}>
               <Text style={styles.highlightLabel}>{item.label}</Text>
               <Text style={styles.highlightValue}>{item.value}</Text>
-            </View>
+            </AppCard>
           ))}
         </View>
 
-        <View style={styles.formCard}>
+        <AppCard style={styles.formCard}>
           <View style={styles.modeSwitch}>
             <Pressable
-              style={[styles.modeButton, !isSignup && styles.modeButtonActive]}
               onPress={() => setAuthMode('login')}
+              style={[styles.modeButton, !isSignup && styles.modeButtonActive]}
             >
               <Text style={[styles.modeText, !isSignup && styles.modeTextActive]}>Log in</Text>
             </Pressable>
             <Pressable
-              style={[styles.modeButton, isSignup && styles.modeButtonActive]}
               onPress={() => setAuthMode('signup')}
+              style={[styles.modeButton, isSignup && styles.modeButtonActive]}
             >
               <Text style={[styles.modeText, isSignup && styles.modeTextActive]}>Sign up</Text>
             </Pressable>
@@ -81,125 +120,166 @@ export default function AuthScreen() {
             Create your student profile, add your strengths, and start browsing nearby quick jobs.
           </Text>
 
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Full name"
-            placeholderTextColor={colors.subtleText}
-            style={styles.input}
-          />
-          <TextInput
-            value={email}
+          <AppTextInput onChangeText={setName} placeholder="Full name" value={name} />
+          <AppTextInput
+            autoCapitalize="none"
             onChangeText={setEmail}
             placeholder="Campus email"
-            placeholderTextColor={colors.subtleText}
-            autoCapitalize="none"
-            style={styles.input}
+            value={email}
           />
           {isSignup ? (
-            <TextInput
-              value={bio}
+            <AppTextInput
+              multiline
               onChangeText={setBio}
               placeholder="Short bio"
-              placeholderTextColor={colors.subtleText}
-              multiline
-              style={[styles.input, styles.bioInput]}
+              style={styles.bioInput}
+              value={bio}
             />
           ) : null}
-          <TextInput
-            value={password}
+          <AppTextInput
+            autoCapitalize="none"
             onChangeText={setPassword}
             placeholder="Password"
-            placeholderTextColor={colors.subtleText}
             secureTextEntry
-            style={styles.input}
+            value={password}
           />
 
-          <Pressable style={styles.primaryButton} onPress={handleSubmit}>
-            <Text style={styles.primaryButtonText}>{isSignup ? 'Create account' : 'Enter app'}</Text>
-          </Pressable>
+          {feedback ? (
+            <Text
+              style={[
+                styles.feedbackText,
+                feedbackTone === 'error' ? styles.feedbackError : styles.feedbackSuccess,
+              ]}
+            >
+              {feedback}
+            </Text>
+          ) : null}
+
+          <AppButton
+            disabled={isSubmitting || isAuthLoading}
+            label={buttonLabel}
+            onPress={handleSubmit}
+          />
 
           <Text style={styles.footnote}>
-            Student verification is shown as a green badge after onboarding.
+            Student verification is shown as a blue badge after onboarding.
           </Text>
-        </View>
+        </AppCard>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.xl, gap: spacing.xl },
-  hero: { paddingTop: spacing.xxl + 8, gap: spacing.sm },
+  container: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  content: {
+    gap: spacing.xl,
+    padding: spacing.xl,
+  },
+  hero: {
+    gap: spacing.sm,
+  },
   badge: {
     alignSelf: 'flex-start',
     backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
     color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-    fontWeight: '700',
-    fontSize: 12,
   },
-  title: { fontSize: 34, lineHeight: 40, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: 15, lineHeight: 23, color: colors.secondaryText },
-  highlightRow: { gap: spacing.md },
+  title: {
+    color: colors.text,
+    fontSize: 34,
+    fontWeight: '800',
+    lineHeight: 40,
+  },
+  subtitle: {
+    color: colors.secondaryText,
+    fontSize: 15,
+    lineHeight: 23,
+  },
+  highlightColumn: {
+    gap: spacing.md,
+  },
   highlightCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
     padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow,
   },
   highlightLabel: {
+    color: colors.text,
     fontSize: 13,
     fontWeight: '700',
-    color: colors.text,
     marginBottom: 6,
   },
-  highlightValue: { fontSize: 14, lineHeight: 21, color: colors.secondaryText },
+  highlightValue: {
+    color: colors.secondaryText,
+    fontSize: 14,
+    lineHeight: 21,
+  },
   formCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
     gap: spacing.md,
-    ...shadow,
+    padding: spacing.lg,
   },
   modeSwitch: {
-    flexDirection: 'row',
     backgroundColor: colors.background,
     borderRadius: radius.pill,
+    flexDirection: 'row',
     padding: 4,
   },
-  modeButton: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: radius.pill },
-  modeButtonActive: { backgroundColor: colors.card },
-  modeText: { color: colors.subtleText, fontWeight: '700' },
-  modeTextActive: { color: colors.text },
-  sectionTitle: { fontSize: 22, fontWeight: '800', color: colors.text },
-  sectionSubtitle: { fontSize: 14, lineHeight: 21, color: colors.secondaryText },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
-    fontSize: 15,
+  modeButton: {
+    alignItems: 'center',
+    borderRadius: radius.pill,
+    flex: 1,
+    paddingVertical: 12,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.card,
+  },
+  modeText: {
+    color: colors.subtleText,
+    fontWeight: '700',
+  },
+  modeTextActive: {
     color: colors.text,
   },
-  bioInput: { minHeight: 88, textAlignVertical: 'top' },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 4,
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '800',
   },
-  primaryButtonText: { color: colors.card, fontWeight: '800', fontSize: 15 },
-  footnote: { fontSize: 12, lineHeight: 18, color: colors.subtleText },
+  sectionSubtitle: {
+    color: colors.secondaryText,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  bioInput: {
+    minHeight: 88,
+    textAlignVertical: 'top',
+  },
+  footnote: {
+    color: colors.subtleText,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  feedbackText: {
+    borderRadius: radius.md,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  feedbackError: {
+    backgroundColor: '#FDECEC',
+    color: colors.danger,
+  },
+  feedbackSuccess: {
+    backgroundColor: '#EAF2FF',
+    color: colors.primary,
+  },
 });

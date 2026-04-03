@@ -1,122 +1,354 @@
-import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useApp } from '../context/AppContext';
-import { colors, radius, shadow, spacing } from '../theme';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AppButton from '../components/AppButton';
+import AppCard from '../components/AppCard';
+import useAppState from '../hooks/useAppState';
+import { ROOT_ROUTES, TAB_ROUTES } from '../navigation/routes';
+import { buildInitials } from '../services/profileService';
+import { jobStatusFlow } from '../services/jobService';
+import { colors, radius, spacing } from '../utils/theme';
+import { formatJobDistance, formatJobPrice, formatJobStatus } from '../utils/jobFormatters';
 
-const statusFlow = ['posted', 'accepted', 'in progress', 'completed'];
+function ApplicantCard({ application, canReview, onAccept, onReject }) {
+  return (
+    <View style={styles.applicantCard}>
+      <View style={styles.applicantHeader}>
+        <View style={styles.applicantAvatar}>
+          <Text style={styles.applicantAvatarText}>
+            {application.applicant.initials || buildInitials(application.applicant.name)}
+          </Text>
+        </View>
+        <View style={styles.applicantCopy}>
+          <View style={styles.applicantNameRow}>
+            <Text style={styles.applicantName}>{application.applicant.name}</Text>
+            {application.applicant.isVerified ? (
+              <View style={styles.applicantBadge}>
+                <Text style={styles.applicantBadgeText}>Verified</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.applicantMeta}>
+            {application.applicant.school} - {application.applicant.rating} rating
+          </Text>
+          {application.applicant.shortBio ? (
+            <Text numberOfLines={2} style={styles.applicantBio}>
+              {application.applicant.shortBio}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.applicantStatus}>{formatJobStatus(application.status)}</Text>
+      </View>
 
-function formatStatus(status) {
-  return status[0].toUpperCase() + status.slice(1);
+      {canReview ? (
+        <View style={styles.applicantActions}>
+          <AppButton label="Accept" onPress={onAccept} style={styles.flexButton} />
+          <AppButton
+            label="Reject"
+            onPress={onReject}
+            style={styles.flexButton}
+            variant="secondary"
+          />
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
-export default function JobDetailScreen({ route, navigation }) {
+export default function JobDetailScreen({ navigation, route }) {
   const { jobId } = route.params;
-  const { getJobById, applyForJob, instantAcceptJob, updateJobStatus, cancelJob } = useApp();
+  const {
+    applicationsNotice,
+    currentUser,
+    getJobById,
+    getMyApplicationForJob,
+    getOwnerApplicationsForJob,
+    applyForJob,
+    cancelJob,
+    instantAcceptJob,
+    isOwnerApplicationsLoading,
+    loadOwnerApplicationsForJob,
+    openApplicationChat,
+    openJobChat,
+    reviewApplicationForOwnedJob,
+    threads,
+    updateJobStatus,
+  } = useAppState();
+  const [isOpeningChat, setIsOpeningChat] = useState(false);
   const job = getJobById(jobId);
 
   if (!job) {
     return (
       <View style={styles.emptyState}>
         <Text style={styles.emptyTitle}>Job not found</Text>
-        <Pressable style={styles.inlineButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.inlineButtonText}>Go back</Text>
-        </Pressable>
+        <AppButton label="Go back" onPress={() => navigation.goBack()} style={styles.inlineButton} />
       </View>
     );
   }
 
-  const currentIndex = statusFlow.indexOf(job.status);
-  const canAdvance = currentIndex >= 0 && currentIndex < statusFlow.length - 1;
+  const currentIndex = jobStatusFlow.indexOf(job.status);
+  const canAdvance = currentIndex >= 0 && currentIndex < jobStatusFlow.length - 1;
+  const isOwnJob = job.createdBy === currentUser.id;
+  const myApplication = getMyApplicationForJob(jobId);
+  const ownerApplications = getOwnerApplicationsForJob(jobId);
+  const isLoadingOwnerApplications = isOwnerApplicationsLoading(jobId);
+  const existingThread = threads.find((thread) => thread.jobId === jobId);
 
-  const handleAdvance = () => {
+  useEffect(() => {
+    if (!isOwnJob) {
+      return;
+    }
+
+    loadOwnerApplicationsForJob(jobId).catch(() => {});
+  }, [isOwnJob, jobId]);
+
+  const handleAdvance = async () => {
     if (!canAdvance) {
       return;
     }
-    updateJobStatus(job.id, statusFlow[currentIndex + 1]);
+
+    try {
+      await updateJobStatus(job.id, jobStatusFlow[currentIndex + 1]);
+    } catch (error) {
+      Alert.alert('Update failed', error.message || 'We could not update the job status.');
+    }
   };
 
-  const handleCancel = () => {
-    cancelJob(job.id);
-    Alert.alert('Job cancelled', 'This task has been marked as cancelled.');
+  const handleCancel = async () => {
+    try {
+      await cancelJob(job.id);
+      Alert.alert('Job cancelled', 'This task has been marked as cancelled.');
+    } catch (error) {
+      Alert.alert('Cancel failed', error.message || 'We could not cancel this job.');
+    }
+  };
+
+  const handleMessageRequester = async () => {
+    setIsOpeningChat(true);
+
+    try {
+      const thread = await openJobChat(job.id);
+
+      if (!thread) {
+        return;
+      }
+
+      navigation.navigate(ROOT_ROUTES.MAIN_TABS, {
+        params: {
+          openThreadId: thread.id,
+          openThreadName: thread.participant.name,
+          openThreadNonce: Date.now(),
+        },
+        screen: TAB_ROUTES.MESSAGES,
+      });
+    } catch (error) {
+      Alert.alert('Chat unavailable', error.message || 'We could not open this conversation.');
+    } finally {
+      setIsOpeningChat(false);
+    }
+  };
+
+  const handleReviewApplication = async (applicationId, nextStatus) => {
+    try {
+      const result = await reviewApplicationForOwnedJob(applicationId, nextStatus);
+
+      if (nextStatus === 'accepted') {
+        try {
+          const thread = await openApplicationChat(applicationId);
+
+          if (thread) {
+            navigation.navigate(ROOT_ROUTES.MAIN_TABS, {
+              params: {
+                openThreadId: thread.id,
+                openThreadName: thread.participant.name,
+                openThreadNonce: Date.now(),
+              },
+              screen: TAB_ROUTES.MESSAGES,
+            });
+            return;
+          }
+        } catch (chatError) {
+          Alert.alert(
+            'Applicant accepted',
+            chatError.message || 'The job was assigned, but we could not open chat yet.'
+          );
+          return;
+        }
+      }
+
+      Alert.alert(
+        nextStatus === 'accepted' ? 'Applicant accepted' : 'Applicant rejected',
+        nextStatus === 'accepted'
+          ? `The job is now assigned to ${result.application.applicantId ? 'this student' : 'the student'}.`
+          : 'This application has been declined.'
+      );
+    } catch (error) {
+      Alert.alert(
+        'Review failed',
+        error.message || 'We could not update this application right now.'
+      );
+    }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.heroCard}>
+    <ScrollView contentContainerStyle={styles.content} style={styles.container}>
+      {job.imageUrls?.length ? (
+        <ScrollView
+          contentContainerStyle={styles.galleryRow}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+        >
+          {job.imageUrls.map((imageUrl) => (
+            <Image key={imageUrl} source={{ uri: imageUrl }} style={styles.galleryImage} />
+          ))}
+        </ScrollView>
+      ) : null}
+
+      <AppCard style={styles.heroCard}>
         <View style={styles.heroHeader}>
           <View>
             <Text style={styles.category}>{job.category}</Text>
             <Text style={styles.title}>{job.title}</Text>
           </View>
-          <Text style={styles.price}>${job.price}</Text>
+          <Text style={styles.price}>{formatJobPrice(job.price)}</Text>
         </View>
         <Text style={styles.description}>{job.description}</Text>
         <View style={styles.metaBlock}>
-          <Text style={styles.metaText}>Location: {job.location}</Text>
+          <Text style={styles.metaText}>Address: {job.location}</Text>
           <Text style={styles.metaText}>
             When: {job.date}, {job.time}
           </Text>
-          <Text style={styles.metaText}>Distance: {job.distance} km away</Text>
+          <Text style={styles.metaText}>Distance: {formatJobDistance(job.distance)} away</Text>
         </View>
-      </View>
+      </AppCard>
 
-      <View style={styles.card}>
+      <AppCard style={styles.card}>
         <Text style={styles.sectionTitle}>Requester</Text>
         <Text style={styles.requesterName}>{job.requester.name}</Text>
         <Text style={styles.metaText}>
-          {job.requester.school} · {job.requester.rating} rating
+          {job.requester.school} - {job.requester.rating} rating
         </Text>
-      </View>
+      </AppCard>
 
-      <View style={styles.card}>
+      <AppCard style={styles.card}>
         <Text style={styles.sectionTitle}>Job status</Text>
         <View style={styles.timeline}>
-          {statusFlow.map((status, index) => {
+          {jobStatusFlow.map((status, index) => {
             const active = currentIndex >= index;
             return (
               <View key={status} style={styles.timelineItem}>
                 <View style={[styles.timelineDot, active && styles.timelineDotActive]} />
                 <Text style={[styles.timelineText, active && styles.timelineTextActive]}>
-                  {formatStatus(status)}
+                  {formatJobStatus(status)}
                 </Text>
               </View>
             );
           })}
           {job.status === 'cancelled' ? (
             <View style={styles.timelineItem}>
-              <View style={[styles.timelineDot, { backgroundColor: colors.danger }]} />
-              <Text style={[styles.timelineText, { color: colors.danger }]}>Cancelled</Text>
+              <View style={[styles.timelineDot, styles.timelineDotCancelled]} />
+              <Text style={[styles.timelineText, styles.timelineTextCancelled]}>Cancelled</Text>
             </View>
           ) : null}
         </View>
-      </View>
+      </AppCard>
+
+      {isOwnJob ? (
+        <AppCard style={styles.card}>
+          <Text style={styles.sectionTitle}>Applicants</Text>
+          {isLoadingOwnerApplications ? (
+            <Text style={styles.metaText}>Loading applicants for this job...</Text>
+          ) : applicationsNotice ? (
+            <Text style={styles.metaText}>{applicationsNotice}</Text>
+          ) : ownerApplications.length ? (
+            ownerApplications.map((application) => (
+              <ApplicantCard
+                application={application}
+                canReview={job.status === 'posted' && application.status === 'pending'}
+                key={application.id}
+                onAccept={() => handleReviewApplication(application.id, 'accepted')}
+                onReject={() => handleReviewApplication(application.id, 'rejected')}
+              />
+            ))
+          ) : (
+            <Text style={styles.metaText}>
+              No one has applied yet. New student applications will appear here.
+            </Text>
+          )}
+        </AppCard>
+      ) : null}
 
       <View style={styles.actionCard}>
-        {job.status === 'posted' ? (
+        {!isOwnJob ? (
           <>
-            <Pressable style={styles.primaryButton} onPress={() => applyForJob(job.id)}>
-              <Text style={styles.primaryButtonText}>Apply for job</Text>
-            </Pressable>
+            <AppButton
+              disabled={isOpeningChat}
+              label={
+                isOpeningChat
+                  ? 'Opening chat...'
+                  : existingThread
+                    ? 'Open conversation'
+                    : 'Message requester'
+              }
+              onPress={handleMessageRequester}
+              variant="secondary"
+            />
+            <Text style={styles.messageHint}>
+              {existingThread
+                ? 'This opens your conversation inside Messages.'
+                : 'Start a conversation with the requester and it will appear in Messages.'}
+            </Text>
+          </>
+        ) : null}
+
+        {!isOwnJob && myApplication?.status === 'pending' ? (
+          <AppButton disabled label="Application sent" variant="secondary" />
+        ) : null}
+
+        {!isOwnJob && myApplication?.status === 'accepted' ? (
+          <AppButton disabled label="You accepted this job" variant="secondary" />
+        ) : null}
+
+        {!isOwnJob && job.status === 'posted' && !myApplication ? (
+          <>
+            <AppButton
+              label="Apply for job"
+              onPress={async () => {
+                try {
+                  await applyForJob(job.id);
+                } catch (error) {
+                  Alert.alert('Apply failed', error.message || 'We could not apply for this job.');
+                }
+              }}
+            />
             {job.instantAccept ? (
-              <Pressable style={styles.secondaryButton} onPress={() => instantAcceptJob(job.id)}>
-                <Text style={styles.secondaryButtonText}>Instant accept</Text>
-              </Pressable>
+              <AppButton
+                label="Instant accept"
+                onPress={async () => {
+                  try {
+                    await instantAcceptJob(job.id);
+                  } catch (error) {
+                    Alert.alert(
+                      'Accept failed',
+                      error.message || 'We could not instantly accept this job.'
+                    );
+                  }
+                }}
+                variant="secondary"
+              />
             ) : null}
           </>
         ) : null}
 
-        {canAdvance && job.status !== 'cancelled' ? (
-          <Pressable style={styles.secondaryButton} onPress={handleAdvance}>
-            <Text style={styles.secondaryButtonText}>
-              Move to {formatStatus(statusFlow[currentIndex + 1])}
-            </Text>
-          </Pressable>
+        {isOwnJob && canAdvance && job.status !== 'cancelled' ? (
+          <AppButton
+            label={`Move to ${formatJobStatus(jobStatusFlow[currentIndex + 1])}`}
+            onPress={handleAdvance}
+            variant="secondary"
+          />
         ) : null}
 
-        {job.status !== 'completed' && job.status !== 'cancelled' ? (
-          <Pressable style={styles.ghostButton} onPress={handleCancel}>
-            <Text style={styles.ghostButtonText}>Cancel job</Text>
-          </Pressable>
+        {isOwnJob && job.status !== 'completed' && job.status !== 'cancelled' ? (
+          <AppButton label="Cancel job" onPress={handleCancel} variant="ghost" />
         ) : null}
       </View>
     </ScrollView>
@@ -124,73 +356,204 @@ export default function JobDetailScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, gap: spacing.lg },
-  heroCard: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: spacing.md,
-    ...shadow,
-  },
-  heroHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
-  category: { color: colors.primary, fontWeight: '700', fontSize: 13, marginBottom: 8 },
-  title: { color: colors.text, fontSize: 26, lineHeight: 31, fontWeight: '800', maxWidth: 260 },
-  price: { color: colors.text, fontSize: 28, fontWeight: '800' },
-  description: { color: colors.secondaryText, fontSize: 15, lineHeight: 23 },
-  metaBlock: { gap: 6 },
-  metaText: { color: colors.secondaryText, fontSize: 14 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+  applicantActions: {
+    flexDirection: 'row',
     gap: spacing.sm,
-    ...shadow,
+    marginTop: spacing.sm,
   },
-  sectionTitle: { color: colors.text, fontWeight: '800', fontSize: 18 },
-  requesterName: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  timeline: { gap: spacing.sm },
-  timelineItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  timelineDot: { width: 12, height: 12, borderRadius: 999, backgroundColor: '#D8D4CB' },
-  timelineDotActive: { backgroundColor: colors.primary },
-  timelineText: { color: colors.subtleText, fontSize: 14, fontWeight: '600' },
-  timelineTextActive: { color: colors.text },
-  actionCard: { gap: spacing.sm, paddingBottom: spacing.xxl },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: 16,
+  applicantAvatar: {
     alignItems: 'center',
+    backgroundColor: colors.primarySoft,
+    borderRadius: 22,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
   },
-  primaryButtonText: { color: colors.card, fontWeight: '800', fontSize: 15 },
-  secondaryButton: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
+  applicantAvatarText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  applicantBadge: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  applicantBadgeText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  applicantBio: {
+    color: colors.secondaryText,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  applicantCard: {
+    backgroundColor: colors.background,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingVertical: 16,
-    alignItems: 'center',
+    borderWidth: 1,
+    padding: spacing.md,
   },
-  secondaryButtonText: { color: colors.text, fontWeight: '700', fontSize: 15 },
-  ghostButton: { alignItems: 'center', paddingVertical: 12 },
-  ghostButtonText: { color: colors.danger, fontWeight: '700', fontSize: 14 },
-  emptyState: {
+  applicantCopy: {
     flex: 1,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
+  },
+  applicantHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  applicantMeta: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  applicantName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  applicantNameRow: {
     alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  applicantStatus: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  container: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
+  content: {
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
+  heroCard: {
     gap: spacing.md,
+    padding: spacing.lg,
   },
-  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },
-  inlineButton: {
+  galleryImage: {
+    borderRadius: 22,
+    height: 220,
+    width: 260,
+  },
+  galleryRow: {
+    gap: spacing.md,
+    paddingRight: spacing.lg,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+  },
+  category: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  title: {
+    color: colors.text,
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 31,
+    maxWidth: 260,
+  },
+  price: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  description: {
+    color: colors.secondaryText,
+    fontSize: 15,
+    lineHeight: 23,
+  },
+  metaBlock: {
+    gap: 6,
+  },
+  metaText: {
+    color: colors.secondaryText,
+    fontSize: 14,
+  },
+  card: {
+    gap: spacing.sm,
+    padding: spacing.lg,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  requesterName: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  timeline: {
+    gap: spacing.sm,
+  },
+  timelineItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  timelineDot: {
+    backgroundColor: '#D8D4CB',
+    borderRadius: 999,
+    height: 12,
+    width: 12,
+  },
+  timelineDotActive: {
     backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
   },
-  inlineButtonText: { color: colors.card, fontWeight: '700' },
+  timelineDotCancelled: {
+    backgroundColor: colors.danger,
+  },
+  timelineText: {
+    color: colors.subtleText,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  timelineTextActive: {
+    color: colors.text,
+  },
+  timelineTextCancelled: {
+    color: colors.danger,
+  },
+  actionCard: {
+    gap: spacing.sm,
+    paddingBottom: spacing.xxl,
+  },
+  emptyState: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    flex: 1,
+    gap: spacing.md,
+    justifyContent: 'center',
+  },
+  flexButton: {
+    flex: 1,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  inlineButton: {
+    minWidth: 120,
+  },
+  messageHint: {
+    color: colors.subtleText,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
 });

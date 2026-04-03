@@ -1,23 +1,6 @@
-export const categories = ['All', 'Runner', 'Usher', 'Helper', 'Delivery', 'Events'];
+export const jobCategories = ['All', 'Runner', 'Usher', 'Helper', 'Delivery', 'Events'];
 
-export const skillTags = [
-  'Campus runner',
-  'Event support',
-  'Flyer handout',
-  'Queue helper',
-  'Pickup and drop',
-];
-
-export const starterUser = {
-  id: 'student-001',
-  name: 'Minji Park',
-  shortBio: 'Business student who picks up fast campus gigs between classes.',
-  rating: 4.9,
-  completedJobs: 38,
-  skills: ['Runner', 'Usher', 'Helper', 'Delivery'],
-  isVerified: true,
-  avatar: 'MP',
-};
+export const jobStatusFlow = ['posted', 'accepted', 'in progress', 'completed'];
 
 export const starterJobs = [
   {
