@@ -1,8 +1,10 @@
 export const ROOT_ROUTES = {
   AUTH: 'Auth',
+  BADGE_MANAGEMENT: 'BadgeManagement',
   MAIN_TABS: 'MainTabs',
   CHAT_THREAD: 'ChatThread',
   JOB_DETAIL: 'JobDetail',
+  USER_PROFILE: 'UserProfile',
 };
 
 export const TAB_ROUTES = {
