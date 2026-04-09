@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 import AuthScreen from '../screens/AuthScreen';
+import BadgeManagementScreen from '../screens/BadgeManagementScreen';
 import ChatThreadScreen from '../screens/ChatThreadScreen';
 import JobDetailScreen from '../screens/JobDetailScreen';
+import LaunchSplashScreen from '../screens/LaunchSplashScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 import useAppState from '../hooks/useAppState';
 import { colors } from '../utils/theme';
 import { navigationTheme } from './navigationTheme';
@@ -22,14 +25,27 @@ const screenOptions = {
 
 export default function AppNavigator() {
   const { isAuthenticated, isAuthLoading } = useAppState();
+  const [isLaunchSplashVisible, setIsLaunchSplashVisible] = useState(true);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setIsLaunchSplashVisible(false);
+    }, 3000);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
+  const shouldShowLaunchSplash = isLaunchSplashVisible || isAuthLoading;
 
   return (
     <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator screenOptions={screenOptions}>
-        {isAuthLoading ? (
+        {shouldShowLaunchSplash ? (
           <Stack.Screen
-            component={AuthLoadingScreen}
-            name="AuthLoading"
+            component={LaunchSplashScreen}
+            name="LaunchSplash"
             options={{ headerShown: false }}
           />
         ) : !isAuthenticated ? (
@@ -69,20 +85,34 @@ export default function AppNavigator() {
                 ),
               })}
             />
+            <Stack.Screen
+              component={ProfileScreen}
+              name={ROOT_ROUTES.USER_PROFILE}
+              options={({ navigation }) => ({
+                title: 'Profile',
+                headerLeft: () => (
+                  <Pressable hitSlop={12} onPress={() => navigation.goBack()}>
+                    <Text style={styles.backText}>Back</Text>
+                  </Pressable>
+                ),
+              })}
+            />
+            <Stack.Screen
+              component={BadgeManagementScreen}
+              name={ROOT_ROUTES.BADGE_MANAGEMENT}
+              options={({ navigation }) => ({
+                title: 'Manage badges',
+                headerLeft: () => (
+                  <Pressable hitSlop={12} onPress={() => navigation.goBack()}>
+                    <Text style={styles.backText}>Back</Text>
+                  </Pressable>
+                ),
+              })}
+            />
           </>
         )}
       </Stack.Navigator>
     </NavigationContainer>
-  );
-}
-
-function AuthLoadingScreen() {
-  return (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator color={colors.primary} size="large" />
-      <Text style={styles.loadingTitle}>Connecting your secure account</Text>
-      <Text style={styles.loadingText}>Checking your saved session and profile.</Text>
-    </View>
   );
 }
 
@@ -91,25 +121,5 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 15,
     fontWeight: '700',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  loadingTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: '800',
-    marginTop: 18,
-  },
-  loadingText: {
-    color: colors.secondaryText,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-    textAlign: 'center',
   },
 });
