@@ -1,11 +1,18 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, spacing } from '../utils/theme';
-import { formatJobPrice, formatJobSummaryMeta } from '../utils/jobFormatters';
+import { colors, radius, spacing } from '../utils/theme';
+import {
+  formatJobPrice,
+  formatJobSummaryMeta,
+  getListingBadgeLabel,
+  getListingBadgeVariant,
+} from '../utils/jobFormatters';
 import AppCard from './AppCard';
 import JobStatusBadge from './JobStatusBadge';
 
 export default function BrowseJobCard({ job, onPress }) {
+  const badgeVariant = getListingBadgeVariant(job);
+
   return (
     <Pressable onPress={onPress}>
       <AppCard style={styles.card}>
@@ -14,6 +21,23 @@ export default function BrowseJobCard({ job, onPress }) {
           <View style={styles.content}>
             <View style={styles.metaRow}>
               <Text style={styles.category}>{job.category}</Text>
+              <View
+                style={[
+                  styles.typeBadge,
+                  badgeVariant === 'rent' && styles.typeBadgeRent,
+                  badgeVariant === 'sell' && styles.typeBadgeSell,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.typeBadgeText,
+                    badgeVariant === 'rent' && styles.typeBadgeTextRent,
+                    badgeVariant === 'sell' && styles.typeBadgeTextSell,
+                  ]}
+                >
+                  {getListingBadgeLabel(job)}
+                </Text>
+              </View>
               <JobStatusBadge status={job.status} />
             </View>
             <Text style={styles.title}>{job.title}</Text>
@@ -57,6 +81,29 @@ const styles = StyleSheet.create({
     color: colors.secondaryText,
     fontSize: 12,
     fontWeight: '700',
+  },
+  typeBadge: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  typeBadgeRent: {
+    backgroundColor: '#FFF0DD',
+  },
+  typeBadgeSell: {
+    backgroundColor: '#E6F6EC',
+  },
+  typeBadgeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  typeBadgeTextRent: {
+    color: '#D97904',
+  },
+  typeBadgeTextSell: {
+    color: '#23834C',
   },
   title: {
     color: colors.text,

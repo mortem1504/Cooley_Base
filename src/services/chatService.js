@@ -1,7 +1,7 @@
 import { buildInitials } from './profileService';
 import { getSupabaseClient } from './supabaseClient';
 
-const CHAT_REPAIR_FILE = '002_existing_project_repairs.sql';
+const CHAT_REPAIR_FILES = '002_existing_project_repairs.sql and 005_rental_request_flow.sql';
 
 function isRpcArgumentMismatch(error) {
   const message = error?.message || '';
@@ -44,7 +44,7 @@ function normalizeChatBackendError(error) {
     message.includes('is ambiguous')
   ) {
     return new Error(
-      `The messaging backend needs the latest Supabase repair. Run ${CHAT_REPAIR_FILE} in Supabase and try again.`
+      `The messaging backend needs the latest Supabase repairs. Run ${CHAT_REPAIR_FILES} in Supabase and try again.`
     );
   }
 
@@ -61,6 +61,7 @@ function mapThreadRowToAppThread(row) {
     listingTitle: row.listing_title || 'Listing removed',
     listingType: row.listing_type || 'job',
     participant: {
+      avatarUrl: row.participant_avatar_url || null,
       id: row.participant_id || '',
       initials: buildInitials(participantName),
       name: participantName,
@@ -77,6 +78,8 @@ function mapThreadRowToAppThread(row) {
 function mapMessageRowToAppMessage(row) {
   return {
     id: row.id || row.message_id,
+    kind: row.kind || 'text',
+    metadata: row.metadata || {},
     senderId: row.sender_id,
     text: row.body,
     createdAt: new Date(row.created_at).getTime(),

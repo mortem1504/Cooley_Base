@@ -13,16 +13,17 @@ import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
-import { authHighlights } from '../services/authService';
 import { colors, radius, spacing } from '../utils/theme';
 
 export default function AuthScreen() {
   const { authMode, authNotice, isAuthLoading, setAuthMode, login, signup } = useAppState();
   const topInset = useScreenTopInset(spacing.lg);
-  const [name, setName] = useState('Minji Park');
-  const [email, setEmail] = useState('minji@campus.edu');
-  const [password, setPassword] = useState('password');
-  const [bio, setBio] = useState('Reliable student for quick campus help and last-minute errands.');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [bio, setBio] = useState('');
   const [feedback, setFeedback] = useState('');
   const [feedbackTone, setFeedbackTone] = useState('muted');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,14 +49,27 @@ export default function AuthScreen() {
   const handleSubmit = async () => {
     setFeedback('');
     setFeedbackTone('muted');
+
+    if (isSignup) {
+      if (!name.trim() || !username.trim() || !email.trim() || !password.trim()) {
+        setFeedback('Fill in your full name, username, email, and password to create an account.');
+        setFeedbackTone('error');
+        return;
+      }
+    } else if (!loginIdentifier.trim() || !password.trim()) {
+      setFeedback('Enter your username or email and password to log in.');
+      setFeedbackTone('error');
+      return;
+    }
+
     setIsSubmitting(true);
 
     let result;
 
     if (isSignup) {
-      result = await signup({ name, email, password, bio });
+      result = await signup({ name, username, email, password, bio });
     } else {
-      result = await login({ email, password });
+      result = await login({ identifier: loginIdentifier, password });
     }
 
     setIsSubmitting(false);
@@ -81,24 +95,6 @@ export default function AuthScreen() {
         contentContainerStyle={[styles.content, { paddingTop: topInset }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.hero}>
-          <Text style={styles.badge}>Student quick jobs</Text>
-          <Text style={styles.title}>Fast local help, powered by nearby students.</Text>
-          <Text style={styles.subtitle}>
-            Find runner jobs, event shifts, delivery help, and simple campus tasks in a calm,
-            trustworthy marketplace.
-          </Text>
-        </View>
-
-        <View style={styles.highlightColumn}>
-          {authHighlights.map((item) => (
-            <AppCard key={item.label} style={styles.highlightCard}>
-              <Text style={styles.highlightLabel}>{item.label}</Text>
-              <Text style={styles.highlightValue}>{item.value}</Text>
-            </AppCard>
-          ))}
-        </View>
-
         <AppCard style={styles.formCard}>
           <View style={styles.modeSwitch}>
             <Pressable
@@ -115,18 +111,38 @@ export default function AuthScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.sectionTitle}>Simple onboarding</Text>
+          <Text style={styles.sectionTitle}>{isSignup ? 'Create your account' : 'Welcome back'}</Text>
           <Text style={styles.sectionSubtitle}>
-            Create your student profile, add your strengths, and start browsing nearby quick jobs.
+            {isSignup
+              ? 'Set up your account to start posting and browsing nearby listings.'
+              : 'Log in to continue to your nearby jobs and item listings.'}
           </Text>
 
-          <AppTextInput onChangeText={setName} placeholder="Full name" value={name} />
-          <AppTextInput
-            autoCapitalize="none"
-            onChangeText={setEmail}
-            placeholder="Campus email"
-            value={email}
-          />
+          {!isSignup ? (
+            <AppTextInput
+              autoCapitalize="none"
+              onChangeText={setLoginIdentifier}
+              placeholder="Username or email"
+              value={loginIdentifier}
+            />
+          ) : null}
+          {isSignup ? <AppTextInput onChangeText={setName} placeholder="Full name" value={name} /> : null}
+          {isSignup ? (
+            <AppTextInput
+              autoCapitalize="none"
+              onChangeText={setUsername}
+              placeholder="Username"
+              value={username}
+            />
+          ) : null}
+          {isSignup ? (
+            <AppTextInput
+              autoCapitalize="none"
+              onChangeText={setEmail}
+              placeholder="Campus email"
+              value={email}
+            />
+          ) : null}
           {isSignup ? (
             <AppTextInput
               multiline
@@ -176,54 +192,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    gap: spacing.xl,
+    flexGrow: 1,
+    justifyContent: 'center',
     padding: spacing.xl,
-  },
-  hero: {
-    gap: spacing.sm,
-  },
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.pill,
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 34,
-    fontWeight: '800',
-    lineHeight: 40,
-  },
-  subtitle: {
-    color: colors.secondaryText,
-    fontSize: 15,
-    lineHeight: 23,
-  },
-  highlightColumn: {
-    gap: spacing.md,
-  },
-  highlightCard: {
-    padding: spacing.lg,
-  },
-  highlightLabel: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  highlightValue: {
-    color: colors.secondaryText,
-    fontSize: 14,
-    lineHeight: 21,
   },
   formCard: {
     gap: spacing.md,
-    padding: spacing.lg,
+    alignSelf: 'center',
+    padding: spacing.xl,
+    width: '100%',
   },
   modeSwitch: {
     backgroundColor: colors.background,
@@ -249,13 +226,13 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.text,
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: '800',
   },
   sectionSubtitle: {
     color: colors.secondaryText,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 22,
   },
   bioInput: {
     minHeight: 88,
