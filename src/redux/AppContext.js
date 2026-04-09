@@ -11,13 +11,14 @@ import {
   fetchProfileById,
   getCurrentSession,
   onAuthStateChange,
-  signInWithEmail,
+  signInWithIdentifier,
   signOutUser,
   signUpWithEmail,
 } from '../services/authService';
 import {
   createOrGetApplicationThread,
   createOrGetListingThread,
+  fetchThreadById,
   fetchMessagesForThread,
   fetchThreadsForUser,
   markThreadAsRead,
@@ -33,11 +34,23 @@ import {
   updateListingStatus,
 } from '../services/listingsService';
 import {
+  advanceRentalBookingStage,
+  fetchRentalRequestByListing,
+  fetchRentalRequestByThread,
+  requestRentalBooking as requestRentalBookingRecord,
+  reviewRentalBooking as reviewRentalBookingRecord,
+  submitRentalReview as submitRentalReviewRecord,
+} from '../services/rentalService';
+import {
   calculateDistanceKm,
   getCurrentLocationSnapshot,
   isValidCoordinate,
 } from '../services/locationService';
-import { buildCurrentUserProfile, emptyUserProfile } from '../services/profileService';
+import {
+  buildCurrentUserProfile,
+  emptyUserProfile,
+  updateProfileById,
+} from '../services/profileService';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 const AppContext = createContext(null);
@@ -68,6 +81,21 @@ function upsertById(collection, nextItem) {
   );
 }
 
+function dedupeById(collection) {
+  const seenIds = new Set();
+
+  return collection.filter((item) => {
+    const nextId = item?.id;
+
+    if (!nextId || seenIds.has(nextId)) {
+      return false;
+    }
+
+    seenIds.add(nextId);
+    return true;
+  });
+}
+
 function upsertThreadById(collection, nextThread) {
   return [nextThread, ...collection.filter((thread) => thread.id !== nextThread.id)].sort(
     (first, second) => second.updatedAt - first.updatedAt
@@ -78,6 +106,40 @@ function upsertMessageById(collection, nextMessage) {
   return [...collection.filter((message) => message.id !== nextMessage.id), nextMessage].sort(
     (first, second) => first.createdAt - second.createdAt
   );
+}
+
+function patchCurrentUserIntoListings(collection, profile) {
+  if (!profile?.id) {
+    return collection;
+  }
+
+  return collection.map((listing) => {
+    if (listing.createdBy !== profile.id) {
+      return listing;
+    }
+
+    return {
+      ...listing,
+      owner: {
+        ...listing.owner,
+        avatarUrl: profile.avatarUrl,
+        id: profile.id,
+        isVerified: profile.isVerified,
+        name: profile.name,
+        rating: profile.rating,
+        school: profile.schoolName,
+      },
+      requester: {
+        ...listing.requester,
+        avatarUrl: profile.avatarUrl,
+        id: profile.id,
+        isVerified: profile.isVerified,
+        name: profile.name,
+        rating: profile.rating,
+        school: profile.schoolName,
+      },
+    };
+  });
 }
 
 async function hydrateCurrentUser(authUser) {
@@ -125,26 +187,50 @@ export function AppProvider({ children }) {
   const pendingMarketplaceSyncOptionsRef = useRef(null);
   const jobsWithViewerState = useMemo(
     () =>
-      jobs.map((job) => {
-        const myApplication = jobApplications[job.id] || null;
-        const liveDistance =
-          viewerLocation &&
-          isValidCoordinate(job.latitude) &&
-          isValidCoordinate(job.longitude)
-            ? calculateDistanceKm(viewerLocation, {
-                latitude: job.latitude,
-                longitude: job.longitude,
-              })
-            : null;
+      dedupeById(
+        jobs.map((job) => {
+          const myApplication = jobApplications[job.id] || null;
+          const liveDistance =
+            viewerLocation &&
+            isValidCoordinate(job.latitude) &&
+            isValidCoordinate(job.longitude)
+              ? calculateDistanceKm(viewerLocation, {
+                  latitude: job.latitude,
+                  longitude: job.longitude,
+                })
+              : null;
 
-        return {
-          ...job,
-          distance: liveDistance ?? job.distance,
-          hasApplied: Boolean(myApplication),
-          myApplicationStatus: myApplication?.status || null,
-        };
-      }),
+          return {
+            ...job,
+            distance: liveDistance ?? job.distance,
+            hasApplied: Boolean(myApplication),
+            myApplicationStatus: myApplication?.status || null,
+          };
+        })
+      ),
     [jobApplications, jobs, viewerLocation]
+  );
+  const rentalsWithViewerState = useMemo(
+    () =>
+      dedupeById(
+        rentals.map((rental) => {
+          const liveDistance =
+            viewerLocation &&
+            isValidCoordinate(rental.latitude) &&
+            isValidCoordinate(rental.longitude)
+              ? calculateDistanceKm(viewerLocation, {
+                  latitude: rental.latitude,
+                  longitude: rental.longitude,
+                })
+              : null;
+
+          return {
+            ...rental,
+            distance: liveDistance ?? rental.distance,
+          };
+        })
+      ),
+    [rentals, viewerLocation]
   );
 
   const filteredJobs = useMemo(
@@ -173,6 +259,7 @@ export function AppProvider({ children }) {
       .map((job) => ({
         id: job.id,
         type: 'job',
+        listingMode: 'job',
         title: job.title,
         category: job.category,
         coverImageUrl: job.coverImageUrl,
@@ -188,15 +275,20 @@ export function AppProvider({ children }) {
       .map((rental) => ({
         id: rental.id,
         type: 'rental',
+        listingMode: rental.instantAccept ? 'sell' : 'rent',
         title: rental.title,
         category: rental.category,
         coverImageUrl: rental.coverImageUrl,
         location: rental.location,
         price: rental.price,
         status: rental.status,
-        detail: rental.urgent
-          ? `${rental.durationText || rental.duration || 'Flexible'} - Available now`
-          : rental.durationText || rental.duration || 'Flexible',
+        detail: rental.instantAccept
+          ? rental.urgent
+            ? 'For sale - Available now'
+            : 'For sale'
+          : rental.urgent
+            ? `${rental.durationText || rental.duration || 'Flexible'} - Available now`
+            : rental.durationText || rental.duration || 'Flexible',
         createdAt: rental.createdAt || 0,
       }));
 
@@ -748,9 +840,9 @@ export function AppProvider({ children }) {
     };
   }, []);
 
-  const login = async ({ email, password }) => {
+  const login = async ({ identifier, password }) => {
     try {
-      const data = await signInWithEmail({ email, password });
+      const data = await signInWithIdentifier({ identifier, password });
       setAuthMode('login');
       setAuthNotice('');
 
@@ -767,13 +859,14 @@ export function AppProvider({ children }) {
     }
   };
 
-  const signup = async ({ name, email, password, bio }) => {
+  const signup = async ({ name, username, email, password, bio }) => {
     try {
       const data = await signUpWithEmail({
         email,
         fullName: name,
         password,
         shortBio: bio,
+        username,
       });
 
       setAuthMode('login');
@@ -867,7 +960,7 @@ export function AppProvider({ children }) {
       longitude: rentalInput.longitude,
       photos: rentalInput.photos,
       urgent: rentalInput.urgent,
-      instantAccept: false,
+      instantAccept: rentalInput.listingMode === 'sell',
     })
       .then((createdRental) => {
         setRentals((prev) => upsertById(prev, createdRental));
@@ -902,7 +995,10 @@ export function AppProvider({ children }) {
         latitude: listingInput.latitude,
         longitude: listingInput.longitude,
         urgent: listingInput.urgent,
-        instantAccept: existingListing.type === 'job' ? listingInput.urgent : false,
+        instantAccept:
+          existingListing.type === 'job'
+            ? listingInput.urgent
+            : listingInput.listingMode === 'sell',
       });
 
       if (existingListing.type === 'job') {
@@ -1029,6 +1125,32 @@ export function AppProvider({ children }) {
     }
   };
 
+  const refreshMarketplaceAndThreadState = async (threadId = null) => {
+    const activeUserId = session?.user?.id || currentUser.id;
+
+    if (!activeUserId) {
+      return null;
+    }
+
+    await syncMarketplaceState(activeUserId, {
+      preserveOwnerApplications: true,
+    });
+    await syncThreadsState(activeUserId);
+
+    if (!threadId) {
+      return null;
+    }
+
+    const refreshedThread = await fetchThreadById(threadId, activeUserId);
+
+    if (refreshedThread) {
+      setMessageThreads((prev) => upsertThreadById(prev, refreshedThread));
+      await loadMessagesForThread(threadId, true);
+    }
+
+    return refreshedThread;
+  };
+
   const markThreadRead = async (threadId) => {
     setMessageThreads((prev) =>
       prev.map((thread) => (thread.id === threadId ? { ...thread, unreadCount: 0 } : thread))
@@ -1043,14 +1165,16 @@ export function AppProvider({ children }) {
   };
 
   const openJobChat = async (jobId) => {
-    const existingThread = messageThreads.find((thread) => thread.jobId === jobId);
+    const existingThread = messageThreads.find(
+      (thread) => thread.jobId === jobId || thread.listingId === jobId
+    );
 
     if (existingThread) {
       markThreadRead(existingThread.id);
       return existingThread;
     }
 
-    const job = jobs.find((item) => item.id === jobId);
+    const job = jobs.find((item) => item.id === jobId) || rentals.find((item) => item.id === jobId);
 
     if (!job) {
       return null;
@@ -1086,6 +1210,85 @@ export function AppProvider({ children }) {
       setThreadsNotice('');
       return thread;
     } catch (error) {
+      throw error;
+    }
+  };
+
+  const loadRentalRequestForListing = async (listingId) => {
+    try {
+      const request = await fetchRentalRequestByListing(listingId);
+      setListingsNotice('');
+      return request;
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const loadRentalRequestForThread = async (threadId) => {
+    try {
+      const request = await fetchRentalRequestByThread(threadId);
+      setListingsNotice('');
+      return request;
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const requestRentalBooking = async ({ listingId, note, startDate, endDate }) => {
+    try {
+      const result = await requestRentalBookingRecord({
+        listingId,
+        note,
+        startDate,
+        endDate,
+      });
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const reviewRentalBooking = async (requestId, nextStatus) => {
+    try {
+      const result = await reviewRentalBookingRecord(requestId, nextStatus);
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const updateRentalBookingStage = async (requestId, nextStatus) => {
+    try {
+      const result = await advanceRentalBookingStage(requestId, nextStatus);
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const submitRentalReviewForRequest = async ({ requestId, rating, comment }) => {
+    try {
+      const result = await submitRentalReviewRecord({
+        requestId,
+        rating,
+        comment,
+      });
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
       throw error;
     }
   };
@@ -1128,7 +1331,13 @@ export function AppProvider({ children }) {
   const updateJobStatus = async (jobId, status) => {
     try {
       const updatedJob = await updateListingStatus(jobId, status);
-      setJobs((prev) => upsertById(prev, updatedJob));
+
+      if (updatedJob.type === 'job') {
+        setJobs((prev) => upsertById(prev, updatedJob));
+      } else {
+        setRentals((prev) => upsertById(prev, updatedJob));
+      }
+
       setListingsNotice('');
       return updatedJob;
     } catch (error) {
@@ -1165,7 +1374,9 @@ export function AppProvider({ children }) {
 
   const cancelJob = (jobId) => updateJobStatus(jobId, 'cancelled');
 
-  const getJobById = (jobId) => jobsWithViewerState.find((job) => job.id === jobId);
+  const getJobById = (jobId) =>
+    jobsWithViewerState.find((job) => job.id === jobId) ||
+    rentalsWithViewerState.find((rental) => rental.id === jobId);
 
   const getMyApplicationForJob = (jobId) => jobApplications[jobId] || null;
 
@@ -1187,6 +1398,30 @@ export function AppProvider({ children }) {
     }
   };
 
+  const updateCurrentUserProfile = async (profileInput) => {
+    const activeUserId = session?.user?.id || currentUser.id;
+
+    if (!activeUserId) {
+      throw new Error('You must be logged in to update your profile.');
+    }
+
+    const result = await updateProfileById(activeUserId, profileInput, currentUser);
+    const updatedProfile = result.profile;
+    const nextUser = {
+      ...currentUser,
+      ...updatedProfile,
+    };
+
+    setCurrentUser(nextUser);
+    setJobs((prev) => patchCurrentUserIntoListings(prev, nextUser));
+    setRentals((prev) => patchCurrentUserIntoListings(prev, nextUser));
+    setAuthNotice('');
+    return {
+      omittedFields: result.omittedFields,
+      profile: nextUser,
+    };
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1203,6 +1438,8 @@ export function AppProvider({ children }) {
         getMessagesForThread,
         getOwnerApplicationsForJob,
         getThreadById,
+        loadRentalRequestForListing,
+        loadRentalRequestForThread,
         instantAcceptJob,
         isAuthLoading,
         isAuthenticated,
@@ -1225,20 +1462,25 @@ export function AppProvider({ children }) {
         openApplicationChat,
         postJob,
         postRental,
+        requestRentalBooking,
         refreshViewerLocation,
-        rentals,
+        rentals: rentalsWithViewerState,
         reviewApplicationForOwnedJob,
+        reviewRentalBooking,
         resetFilters,
         removeOwnedListing,
         sendMessage,
         setAuthMode,
         setFilters,
         signup,
+        submitRentalReviewForRequest,
         threads,
         threadsNotice,
         unreadThreadCount,
+        updateCurrentUserProfile,
         updateOwnedListing,
         updateJobStatus,
+        updateRentalBookingStage,
         applyForJob,
         viewerLocation,
       }}

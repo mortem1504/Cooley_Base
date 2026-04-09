@@ -62,22 +62,34 @@ function normalizeCoordinate(value) {
 
 function buildUiStatus(type, dbStatus) {
   if (dbStatus === 'open') {
-    return type === 'job' ? 'posted' : 'live';
+    return type === 'job' ? 'posted' : 'available';
+  }
+
+  if (type === 'rental' && dbStatus === 'requested') {
+    return 'requested';
   }
 
   if (dbStatus === 'in_progress') {
-    return 'in progress';
+    return type === 'job' ? 'in progress' : 'ongoing';
   }
 
-  return dbStatus || (type === 'job' ? 'posted' : 'live');
+  return dbStatus || (type === 'job' ? 'posted' : 'available');
 }
 
 function buildDbStatus(uiStatus) {
-  if (uiStatus === 'posted' || uiStatus === 'live') {
+  if (uiStatus === 'posted' || uiStatus === 'available') {
     return 'open';
   }
 
+  if (uiStatus === 'requested') {
+    return 'requested';
+  }
+
   if (uiStatus === 'in progress') {
+    return 'in_progress';
+  }
+
+  if (uiStatus === 'ongoing') {
     return 'in_progress';
   }
 
@@ -142,6 +154,7 @@ export function mapListingRowToAppListing(row) {
   return {
     id: row.id,
     createdAt: new Date(row.created_at).getTime(),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : new Date(row.created_at).getTime(),
     createdBy: row.owner_id,
     type: row.type,
     title: row.title,
@@ -159,6 +172,7 @@ export function mapListingRowToAppListing(row) {
     coverImageUrl: images[0]?.url || null,
     durationText: row.duration_text,
     duration: row.duration_text,
+    listingMode: row.type === 'rental' && row.instant_accept ? 'sell' : 'rent',
     imageCount: images.length,
     imageUrls: images.map((image) => image.url),
     images,

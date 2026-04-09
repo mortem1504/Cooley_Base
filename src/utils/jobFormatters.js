@@ -4,6 +4,28 @@ export function formatJobPrice(price) {
   return formatPrice(price);
 }
 
+export function getListingBadgeVariant(job) {
+  if (job?.type === 'rental') {
+    return job.instantAccept ? 'sell' : 'rent';
+  }
+
+  return 'job';
+}
+
+export function getListingBadgeLabel(job) {
+  const variant = getListingBadgeVariant(job);
+
+  if (variant === 'sell') {
+    return 'Sell';
+  }
+
+  if (variant === 'rent') {
+    return 'Rent';
+  }
+
+  return 'Job';
+}
+
 export function formatJobStatus(status) {
   return titleCase(status);
 }

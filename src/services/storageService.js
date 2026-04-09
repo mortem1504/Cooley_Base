@@ -2,6 +2,7 @@ import { decode } from 'base64-arraybuffer';
 import { getSupabaseClient } from './supabaseClient';
 
 const LISTING_IMAGES_BUCKET = 'listing-images';
+const AVATARS_BUCKET = 'avatars';
 
 function stripBase64Prefix(value) {
   if (!value) {
@@ -160,5 +161,39 @@ export async function uploadListingImages({ listingId, ownerId, photos }) {
     }
 
     throw new Error(error.message || 'We could not upload your listing photos.');
+  }
+}
+
+export async function uploadUserAvatarImage({ photo, userId }) {
+  if (!photo || !userId) {
+    throw new Error('Choose a profile photo before saving your profile.');
+  }
+
+  const client = getSupabaseClient();
+
+  try {
+    const extension = inferExtension(photo);
+    const mimeType = inferMimeType(photo, extension);
+    const storagePath = `${userId}/avatar`;
+    const fileBuffer = await readPhotoArrayBuffer(photo);
+
+    const { error: uploadError } = await client.storage
+      .from(AVATARS_BUCKET)
+      .upload(storagePath, fileBuffer, {
+        contentType: mimeType,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data: publicUrlData } = client.storage
+      .from(AVATARS_BUCKET)
+      .getPublicUrl(storagePath);
+
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    throw new Error(error.message || 'We could not upload your profile photo.');
   }
 }

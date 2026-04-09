@@ -2,23 +2,28 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
+import UserAvatar from '../components/UserAvatar';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
 import { ROOT_ROUTES } from '../navigation/routes';
 import { formatThreadTimestamp } from '../utils/chatFormatters';
 import { colors, radius, spacing } from '../utils/theme';
 
-function ThreadCard({ onPress, thread }) {
+function ThreadCard({ onOpenProfile, onPress, thread }) {
   const unreadLabel = thread.unreadCount > 9 ? '9+' : `${thread.unreadCount}`;
 
   return (
-    <Pressable onPress={onPress}>
-      <AppCard style={styles.threadCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{thread.participant.initials}</Text>
-        </View>
+    <AppCard style={styles.threadCard}>
+      <UserAvatar
+        avatarUrl={thread.participant.avatarUrl}
+        initials={thread.participant.initials}
+        name={thread.participant.name}
+        onPress={onOpenProfile}
+        size={48}
+      />
 
-        <View style={styles.threadBody}>
+      <Pressable onPress={onPress} style={styles.threadBody}>
+        <View>
           <View style={styles.threadHeader}>
             <View style={styles.nameWrap}>
               <Text style={styles.threadName}>{thread.participant.name}</Text>
@@ -53,8 +58,8 @@ function ThreadCard({ onPress, thread }) {
             ) : null}
           </View>
         </View>
-      </AppCard>
-    </Pressable>
+      </Pressable>
+    </AppCard>
   );
 }
 
@@ -148,6 +153,14 @@ export default function MessagesScreen({ navigation, route }) {
           {filteredThreads.map((thread) => (
             <ThreadCard
               key={thread.id}
+              onOpenProfile={
+                thread.participant.id
+                  ? () =>
+                      navigation.navigate(ROOT_ROUTES.USER_PROFILE, {
+                        userId: thread.participant.id,
+                      })
+                  : undefined
+              }
               onPress={() =>
                 navigation.navigate(ROOT_ROUTES.CHAT_THREAD, {
                   threadId: thread.id,
@@ -220,19 +233,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.md,
-  },
-  avatar: {
-    alignItems: 'center',
-    backgroundColor: colors.primarySoft,
-    borderRadius: 24,
-    height: 48,
-    justifyContent: 'center',
-    width: 48,
-  },
-  avatarText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '800',
   },
   threadBody: {
     flex: 1,

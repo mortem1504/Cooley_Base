@@ -9,11 +9,11 @@ export const postTypeOptions = [
   },
   {
     key: 'rental',
-    title: 'List a Rental',
-    subtitle: 'Rent out your items & earn',
+    title: 'List Your Item',
+    subtitle: 'Rent it out or sell it locally',
     accent: '#4A67F2',
     accentSoft: '#EEF1FF',
-    badge: 'R',
+    badge: 'I',
   },
 ];
 
@@ -55,6 +55,7 @@ export function buildInitialPostForm(type) {
     location: '',
     locationDetails: null,
     category: type === 'job' ? jobPostCategories[0] : rentalPostCategories[0],
+    listingMode: 'rent',
     urgent: false,
     photos: [],
   };
@@ -79,6 +80,7 @@ export function buildPostFormFromListing(listing) {
     category:
       listing?.category ||
       (listing?.type === 'job' ? jobPostCategories[0] : rentalPostCategories[0]),
+    listingMode: listing?.type === 'rental' && listing?.instantAccept ? 'sell' : 'rent',
     urgent: Boolean(listing?.urgent),
     photos:
       listing?.images?.map((image) => ({
