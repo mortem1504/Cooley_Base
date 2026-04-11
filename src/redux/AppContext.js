@@ -7,10 +7,12 @@ import {
   reviewOwnerApplication,
 } from '../services/applicationsService';
 import {
+  GOOGLE_CANCELLED_ERROR,
   ensureProfileForUser,
   fetchProfileById,
   getCurrentSession,
   onAuthStateChange,
+  signInWithGoogle,
   signInWithIdentifier,
   signOutUser,
   signUpWithEmail,
@@ -859,13 +861,40 @@ export function AppProvider({ children }) {
     }
   };
 
-  const signup = async ({ name, username, email, password, bio }) => {
+  const continueWithGoogle = async () => {
+    try {
+      const data = await signInWithGoogle();
+      setAuthNotice('');
+
+      if (data.session?.user) {
+        setSession(data.session);
+        const hydratedUser = await hydrateCurrentUser(data.session.user);
+        setCurrentUser(hydratedUser);
+        return { ok: true };
+      }
+
+      return {
+        ok: true,
+        message: 'Continue in your browser to finish the Google sign in flow.',
+      };
+    } catch (error) {
+      if (error.message === GOOGLE_CANCELLED_ERROR) {
+        setAuthNotice('');
+        return { ok: false, dismissed: true };
+      }
+
+      setAuthNotice(error.message);
+      return { ok: false, error: error.message };
+    }
+  };
+
+  const signup = async ({ name, username, email, password }) => {
     try {
       const data = await signUpWithEmail({
         email,
         fullName: name,
         password,
-        shortBio: bio,
+        shortBio: '',
         username,
       });
 
@@ -1430,6 +1459,7 @@ export function AppProvider({ children }) {
         applicationsNotice,
         cancelJob,
         currentUser,
+        continueWithGoogle,
         filteredJobs,
         filters,
         getJobById,

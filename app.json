@@ -2,6 +2,7 @@
   "expo": {
     "name": "Cooley",
     "slug": "Cooley",
+    "scheme": "cooley",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -27,6 +28,12 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "Cooley uses your location to show nearby jobs, center the live map, and fill your current address."
+        }
+      ],
+      [
+        "expo-web-browser",
+        {
+          "experimentalLauncherActivity": true
         }
       ]
     ],

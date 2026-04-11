@@ -6,36 +6,44 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
-import AppButton from '../components/AppButton';
-import AppCard from '../components/AppCard';
-import AppTextInput from '../components/AppTextInput';
+import { LinearGradient } from 'expo-linear-gradient';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
-import { colors, radius, spacing } from '../utils/theme';
+import { radius, spacing } from '../utils/theme';
+
+function AuthField({ label, style, ...props }) {
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput placeholderTextColor="#6E727C" style={[styles.input, style]} {...props} />
+    </View>
+  );
+}
 
 export default function AuthScreen() {
-  const { authMode, authNotice, isAuthLoading, setAuthMode, login, signup } = useAppState();
+  const { authMode, authNotice, isAuthLoading, setAuthMode, login, signup, continueWithGoogle } =
+    useAppState();
   const topInset = useScreenTopInset(spacing.lg);
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [bio, setBio] = useState('');
   const [feedback, setFeedback] = useState('');
   const [feedbackTone, setFeedbackTone] = useState('muted');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeAction, setActiveAction] = useState('');
 
   const isSignup = authMode === 'signup';
-  const buttonLabel = isSubmitting
+  const isSubmittingEmail = activeAction === 'email';
+  const isSubmittingGoogle = activeAction === 'google';
+  const buttonLabel = isSubmittingEmail
     ? isSignup
       ? 'Creating account...'
       : 'Signing in...'
-    : isSignup
-      ? 'Create account'
-      : 'Enter app';
+    : 'Continue';
 
   useEffect(() => {
     if (!authNotice) {
@@ -45,6 +53,12 @@ export default function AuthScreen() {
     setFeedback(authNotice);
     setFeedbackTone('error');
   }, [authNotice]);
+
+  const handleModeChange = (nextMode) => {
+    setFeedback('');
+    setFeedbackTone('muted');
+    setAuthMode(nextMode);
+  };
 
   const handleSubmit = async () => {
     setFeedback('');
@@ -62,17 +76,17 @@ export default function AuthScreen() {
       return;
     }
 
-    setIsSubmitting(true);
+    setActiveAction('email');
 
     let result;
 
     if (isSignup) {
-      result = await signup({ name, username, email, password, bio });
+      result = await signup({ name, username, email, password });
     } else {
       result = await login({ identifier: loginIdentifier, password });
     }
 
-    setIsSubmitting(false);
+    setActiveAction('');
 
     if (!result?.ok) {
       setFeedback(result?.error || 'Something went wrong while connecting your account.');
@@ -86,177 +100,462 @@ export default function AuthScreen() {
     }
   };
 
+  const handleGoogleContinue = async () => {
+    setFeedback('');
+    setFeedbackTone('muted');
+    setActiveAction('google');
+
+    const result = await continueWithGoogle();
+
+    setActiveAction('');
+
+    if (result?.dismissed) {
+      return;
+    }
+
+    if (!result?.ok) {
+      setFeedback(result?.error || 'Could not continue with Google right now.');
+      setFeedbackTone('error');
+      return;
+    }
+
+    if (result?.message) {
+      setFeedback(result.message);
+      setFeedbackTone('success');
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
-    >
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: topInset }]}
-        showsVerticalScrollIndicator={false}
+    <LinearGradient colors={['#081326', '#09162B', '#05070B']} style={styles.container}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.container}
       >
-        <AppCard style={styles.formCard}>
-          <View style={styles.modeSwitch}>
-            <Pressable
-              onPress={() => setAuthMode('login')}
-              style={[styles.modeButton, !isSignup && styles.modeButtonActive]}
-            >
-              <Text style={[styles.modeText, !isSignup && styles.modeTextActive]}>Log in</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setAuthMode('signup')}
-              style={[styles.modeButton, isSignup && styles.modeButtonActive]}
-            >
-              <Text style={[styles.modeText, isSignup && styles.modeTextActive]}>Sign up</Text>
-            </Pressable>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingTop: topInset }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.backdropGlowTop} />
+          <View style={styles.backdropGlowBottom} />
+
+          <View style={styles.headerBlock}>
+            <View style={styles.brandRow}>
+              <View style={styles.brandMark}>
+                <View style={[styles.brandStroke, styles.brandStrokeShort]} />
+                <View style={[styles.brandStroke, styles.brandStrokeMedium]} />
+                <View style={[styles.brandStroke, styles.brandStrokeTall]} />
+              </View>
+              <Text style={styles.brandText}>Cooley</Text>
+            </View>
+
+            <Text style={styles.headerEyebrow}>Student marketplace</Text>
+            <Text style={styles.headerSubtitle}>
+              Quick jobs, rentals, and trusted student services in one place.
+            </Text>
           </View>
 
-          <Text style={styles.sectionTitle}>{isSignup ? 'Create your account' : 'Welcome back'}</Text>
-          <Text style={styles.sectionSubtitle}>
-            {isSignup
-              ? 'Set up your account to start posting and browsing nearby listings.'
-              : 'Log in to continue to your nearby jobs and item listings.'}
-          </Text>
+          <View style={styles.formCard}>
+            <View style={styles.formHeaderRow}>
+              <View style={styles.modeSwitch}>
+                <Pressable
+                  onPress={() => handleModeChange('login')}
+                  style={[styles.modeChip, !isSignup && styles.modeChipActive]}
+                >
+                  <Text style={[styles.modeChipText, !isSignup && styles.modeChipTextActive]}>
+                    Log in
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => handleModeChange('signup')}
+                  style={[styles.modeChip, isSignup && styles.modeChipActive]}
+                >
+                  <Text style={[styles.modeChipText, isSignup && styles.modeChipTextActive]}>
+                    Sign up
+                  </Text>
+                </Pressable>
+              </View>
 
-          {!isSignup ? (
-            <AppTextInput
-              autoCapitalize="none"
-              onChangeText={setLoginIdentifier}
-              placeholder="Username or email"
-              value={loginIdentifier}
-            />
-          ) : null}
-          {isSignup ? <AppTextInput onChangeText={setName} placeholder="Full name" value={name} /> : null}
-          {isSignup ? (
-            <AppTextInput
-              autoCapitalize="none"
-              onChangeText={setUsername}
-              placeholder="Username"
-              value={username}
-            />
-          ) : null}
-          {isSignup ? (
-            <AppTextInput
-              autoCapitalize="none"
-              onChangeText={setEmail}
-              placeholder="Campus email"
-              value={email}
-            />
-          ) : null}
-          {isSignup ? (
-            <AppTextInput
-              multiline
-              onChangeText={setBio}
-              placeholder="Short bio"
-              style={styles.bioInput}
-              value={bio}
-            />
-          ) : null}
-          <AppTextInput
-            autoCapitalize="none"
-            onChangeText={setPassword}
-            placeholder="Password"
-            secureTextEntry
-            value={password}
-          />
+              <View style={styles.formHeaderTextBlock}>
+                <Text style={styles.sectionTitle}>
+                  {isSignup ? 'Create your account' : 'Welcome back'}
+                </Text>
+                <Text style={styles.sectionSubtitle}>
+                  {isSignup
+                    ? 'Use your full name, username, email, and password to get started.'
+                    : 'Use your username or email and password to continue.'}
+                </Text>
+              </View>
+            </View>
 
-          {feedback ? (
-            <Text
-              style={[
-                styles.feedbackText,
-                feedbackTone === 'error' ? styles.feedbackError : styles.feedbackSuccess,
+            {!isSignup ? (
+              <AuthField
+                autoCapitalize="none"
+                autoCorrect={false}
+                label="Username or email"
+                onChangeText={setLoginIdentifier}
+                placeholder="Enter your username or email"
+                value={loginIdentifier}
+              />
+            ) : null}
+            {isSignup ? (
+              <AuthField
+                autoCapitalize="words"
+                label="Full name"
+                onChangeText={setName}
+                placeholder="Enter your full name"
+                value={name}
+              />
+            ) : null}
+            {isSignup ? (
+              <AuthField
+                autoCapitalize="none"
+                autoCorrect={false}
+                label="Username"
+                onChangeText={setUsername}
+                placeholder="Choose a username"
+                value={username}
+              />
+            ) : null}
+            {isSignup ? (
+              <AuthField
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                label="Email"
+                onChangeText={setEmail}
+                placeholder="Enter your email address"
+                value={email}
+              />
+            ) : null}
+            <AuthField
+              autoCapitalize="none"
+              label="Password"
+              onChangeText={setPassword}
+              onSubmitEditing={handleSubmit}
+              placeholder="Enter your password"
+              secureTextEntry
+              value={password}
+            />
+
+            {feedback ? (
+              <Text
+                style={[
+                  styles.feedbackText,
+                  feedbackTone === 'error' ? styles.feedbackError : styles.feedbackSuccess,
+                ]}
+              >
+                {feedback}
+              </Text>
+            ) : null}
+
+            <Pressable
+              disabled={Boolean(activeAction) || isAuthLoading}
+              onPress={handleSubmit}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                (Boolean(activeAction) || isAuthLoading) && styles.buttonDisabled,
+                pressed && !activeAction && !isAuthLoading && styles.buttonPressed,
               ]}
             >
-              {feedback}
+              <Text style={styles.primaryButtonText}>{buttonLabel}</Text>
+            </Pressable>
+
+            <Text style={styles.switchText}>
+              {isSignup ? 'Already have an account?' : "Don't have an account?"}{' '}
+              <Text
+                onPress={() => handleModeChange(isSignup ? 'login' : 'signup')}
+                style={styles.switchLink}
+              >
+                {isSignup ? 'Sign in' : 'Sign up'}
+              </Text>
             </Text>
-          ) : null}
 
-          <AppButton
-            disabled={isSubmitting || isAuthLoading}
-            label={buttonLabel}
-            onPress={handleSubmit}
-          />
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
-          <Text style={styles.footnote}>
-            Student verification is shown as a blue badge after onboarding.
-          </Text>
-        </AppCard>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <Pressable
+              disabled={Boolean(activeAction) || isAuthLoading}
+              onPress={handleGoogleContinue}
+              style={({ pressed }) => [
+                styles.socialButton,
+                (Boolean(activeAction) || isAuthLoading) && styles.buttonDisabled,
+                pressed && !activeAction && !isAuthLoading && styles.buttonPressed,
+              ]}
+            >
+              <View style={styles.googleBadge}>
+                <Text style={styles.googleBadgeText}>G</Text>
+              </View>
+              <Text style={styles.socialButtonText}>
+                {isSubmittingGoogle
+                  ? 'Connecting to Google...'
+                  : isSignup
+                    ? 'Sign up with Google'
+                    : 'Sign in with Google'}
+              </Text>
+            </Pressable>
+
+            <Text style={styles.footnote}>
+              Google sign-in works in the Cooley development build or installed app.
+            </Text>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.background,
+    backgroundColor: '#090B0F',
     flex: 1,
   },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
-    padding: spacing.xl,
+    overflow: 'hidden',
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  backdropGlowTop: {
+    backgroundColor: 'rgba(52, 120, 255, 0.12)',
+    borderRadius: 260,
+    height: 260,
+    position: 'absolute',
+    right: -100,
+    top: 20,
+    width: 260,
+  },
+  backdropGlowBottom: {
+    backgroundColor: 'rgba(123, 201, 255, 0.08)',
+    borderRadius: 260,
+    bottom: -10,
+    height: 260,
+    left: -120,
+    position: 'absolute',
+    width: 260,
+  },
+  headerBlock: {
+    marginBottom: spacing.xl,
+    maxWidth: 420,
+    paddingTop: spacing.sm,
+  },
+  brandRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginBottom: spacing.md,
+  },
+  brandMark: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    marginRight: spacing.sm,
+  },
+  brandStroke: {
+    backgroundColor: '#3F72FF',
+    borderRadius: radius.pill,
+    transform: [{ rotate: '26deg' }],
+  },
+  brandStrokeShort: {
+    height: 16,
+    width: 6,
+  },
+  brandStrokeMedium: {
+    height: 22,
+    width: 6,
+  },
+  brandStrokeTall: {
+    height: 28,
+    width: 6,
+  },
+  brandText: {
+    color: '#F9FAFB',
+    fontSize: 30,
+    fontWeight: '800',
+  },
+  headerEyebrow: {
+    color: '#8F96A3',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    marginBottom: spacing.sm,
+    textTransform: 'uppercase',
+  },
+  headerSubtitle: {
+    color: '#ABB1BC',
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: 320,
   },
   formCard: {
-    gap: spacing.md,
     alignSelf: 'center',
+    backgroundColor: 'rgba(10, 13, 19, 0.96)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 30,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxWidth: 420,
     padding: spacing.xl,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.28,
+    shadowRadius: 30,
     width: '100%',
   },
+  formHeaderRow: {
+    gap: spacing.md,
+  },
+  formHeaderTextBlock: {
+    gap: 6,
+  },
   modeSwitch: {
-    backgroundColor: colors.background,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: radius.pill,
     flexDirection: 'row',
     padding: 4,
   },
-  modeButton: {
-    alignItems: 'center',
+  modeChip: {
     borderRadius: radius.pill,
-    flex: 1,
-    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
   },
-  modeButtonActive: {
-    backgroundColor: colors.card,
+  modeChipActive: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
-  modeText: {
-    color: colors.subtleText,
+  modeChipText: {
+    color: '#7F8898',
+    fontSize: 13,
     fontWeight: '700',
   },
-  modeTextActive: {
-    color: colors.text,
+  modeChipTextActive: {
+    color: '#F9FAFB',
   },
   sectionTitle: {
-    color: colors.text,
-    fontSize: 26,
+    color: '#F9FAFB',
+    fontSize: 28,
     fontWeight: '800',
+    lineHeight: 32,
   },
   sectionSubtitle: {
-    color: colors.secondaryText,
-    fontSize: 15,
-    lineHeight: 22,
+    color: '#9AA1AC',
+    fontSize: 14,
+    lineHeight: 21,
   },
-  bioInput: {
-    minHeight: 88,
-    textAlignVertical: 'top',
+  fieldGroup: {
+    gap: 8,
+  },
+  fieldLabel: {
+    color: '#F2F4F8',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  input: {
+    backgroundColor: '#161A22',
+    borderColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: 18,
+    borderWidth: 1,
+    color: '#F9FAFB',
+    fontSize: 15,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 15,
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 20,
+    justifyContent: 'center',
+    minHeight: 56,
+    paddingHorizontal: spacing.lg,
+  },
+  primaryButtonText: {
+    color: '#0E1117',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  switchText: {
+    color: '#8E95A2',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  switchLink: {
+    color: '#F9FAFB',
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
+  dividerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  dividerLine: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    color: '#717887',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  socialButton: {
+    alignItems: 'center',
+    backgroundColor: '#1A1F28',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    minHeight: 56,
+    paddingHorizontal: spacing.lg,
+  },
+  googleBadge: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 999,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  googleBadgeText: {
+    color: '#3F72FF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  socialButtonText: {
+    color: '#F9FAFB',
+    fontSize: 16,
+    fontWeight: '800',
   },
   footnote: {
-    color: colors.subtleText,
+    color: '#6F7786',
     fontSize: 12,
     lineHeight: 18,
+    textAlign: 'center',
   },
   feedbackText: {
     borderRadius: radius.md,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     lineHeight: 20,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
   feedbackError: {
-    backgroundColor: '#FDECEC',
-    color: colors.danger,
+    backgroundColor: 'rgba(209, 73, 91, 0.14)',
+    color: '#FF8E99',
   },
   feedbackSuccess: {
-    backgroundColor: '#EAF2FF',
-    color: colors.primary,
+    backgroundColor: 'rgba(63, 114, 255, 0.16)',
+    color: '#AFC3FF',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonPressed: {
+    opacity: 0.88,
   },
 });

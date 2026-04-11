@@ -1,35 +1,40 @@
 # Supabase Setup
 
-## 1. Create a Supabase project
+## Switching To A New Supabase Account
 
-1. Open [https://supabase.com/dashboard](https://supabase.com/dashboard).
-2. Create a project.
-3. Copy the project URL and publishable key from `Connect` or `Project Settings -> API Keys`.
+This app already reads Supabase credentials from [`.env`](C:/Users/PC/OneDrive/Documents/Cooley/.env) through [supabaseClient.js](C:/Users/PC/OneDrive/Documents/Cooley/src/services/supabaseClient.js).
 
-## 2. Add environment variables
+To switch accounts or projects safely:
 
-1. Copy [`.env.example`](C:/Users/PC/OneDrive/Documents/Cooley/.env.example) to `.env`.
-2. Fill in:
+1. Create the new Supabase project in the new account.
+2. Copy [`.env.example`](C:/Users/PC/OneDrive/Documents/Cooley/.env.example) to `.env`.
+3. Replace the values in `.env`:
 
 ```env
-EXPO_PUBLIC_SUPABASE_URL=...
-EXPO_PUBLIC_SUPABASE_ANON_KEY=...
+EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_publishable_anon_key
 ```
 
-## 3. Run the SQL
+4. Open the SQL editor in the new Supabase project.
+5. For a brand-new project, run [schema.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/schema.sql).
+6. For an existing project, apply only the missing files from [migrations](C:/Users/PC/OneDrive/Documents/Cooley/supabase/migrations).
+7. In Supabase Auth, enable Email auth and set your email confirmation preference.
+8. Restart Expo with cache clear:
 
-Use only one of these paths:
+```bash
+npx expo start --clear
+```
 
-- Fresh Supabase project:
-  Run [001_app_schema.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/migrations/001_app_schema.sql)
-- Existing project that already used the old migration chain:
-  Run [002_existing_project_repairs.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/migrations/002_existing_project_repairs.sql)
+## Important Notes
 
-The older numbered migration files were moved to [legacy-migrations](C:/Users/PC/OneDrive/Documents/Cooley/supabase/archive/legacy-migrations) for reference only. New setups should not run them.
+- Changing `.env` switches the app to a different backend project.
+- Existing users, chats, listings, reviews, and storage files do not move automatically.
+- If you need the old data in the new project, export/import has to be done separately in Supabase.
+- The app only needs the project URL and publishable anon key on the frontend.
 
-## 4. Confirm the backend
+## Minimum Backend Check
 
-After the SQL completes, verify these tables exist in Supabase:
+After running the schema, verify these exist in the new project:
 
 - `profiles`
 - `listings`
@@ -38,29 +43,12 @@ After the SQL completes, verify these tables exist in Supabase:
 - `threads`
 - `thread_members`
 - `messages`
+- `rental_requests`
+- `rental_reviews`
 
-## 5. Configure Auth
+## Files Related To Supabase
 
-1. Open `Authentication -> Providers`
-2. Enable `Email`
-3. Decide whether email confirmation should be required
-
-## 6. Start the app
-
-```bash
-npm install
-npx expo start -c
-```
-
-## 7. Test the important flows
-
-1. Sign up with two accounts
-2. Post a listing with photos
-3. Open the listing from the other account
-4. Apply or instant accept
-5. Open `Message requester`
-6. Send messages from both sides
-
-## 8. When to use the repair file again
-
-Run [002_existing_project_repairs.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/migrations/002_existing_project_repairs.sql) any time you need to repair an older Supabase project that was created from the previous scattered migration set.
+- [`.env.example`](C:/Users/PC/OneDrive/Documents/Cooley/.env.example)
+- [supabaseClient.js](C:/Users/PC/OneDrive/Documents/Cooley/src/services/supabaseClient.js)
+- [schema.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/schema.sql)
+- [README.md](C:/Users/PC/OneDrive/Documents/Cooley/supabase/README.md)
