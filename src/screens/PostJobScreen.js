@@ -171,6 +171,15 @@ export default function PostJobScreen({ navigation, route }) {
   const editingListing = editListingId ? getListingForEdit(editListingId) : null;
   const isEditing = Boolean(editingListing);
 
+  const resetPostFlow = () => {
+    setForms({
+      job: buildInitialPostForm('job'),
+      rental: buildInitialPostForm('rental'),
+    });
+    setSelectedType(null);
+    clearEditIntent();
+  };
+
   const activeForm = selectedType ? forms[selectedType] : null;
   const activeCategories = selectedType === 'rental' ? rentalPostCategories : jobPostCategories;
   const activeOption = postTypeOptions.find((option) => option.key === selectedType);
@@ -200,6 +209,14 @@ export default function PostJobScreen({ navigation, route }) {
       [editingListing.type]: buildPostFormFromListing(editingListing),
     }));
   }, [editingListing]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      resetPostFlow();
+    });
+
+    return unsubscribe;
+  }, [navigation, route?.params?.editListingId]);
 
   const clearEditIntent = () => {
     if (route?.params?.editListingId) {
@@ -292,13 +309,12 @@ export default function PostJobScreen({ navigation, route }) {
 
   const goBack = () => {
     if (isEditing) {
-      clearEditIntent();
-      setSelectedType(null);
+      resetPostFlow();
       return;
     }
 
     if (selectedType) {
-      setSelectedType(null);
+      resetPostFlow();
       return;
     }
 
@@ -437,12 +453,7 @@ export default function PostJobScreen({ navigation, route }) {
         });
 
         Alert.alert('Listing updated', 'Your listing details are now live.');
-        clearEditIntent();
-        setForms((prev) => ({
-          ...prev,
-          [editingListing.type]: buildInitialPostForm(editingListing.type),
-        }));
-        setSelectedType(null);
+        resetPostFlow();
         return;
       }
 
@@ -463,6 +474,7 @@ export default function PostJobScreen({ navigation, route }) {
 
         resetFilters();
         Alert.alert('Job posted', 'Your post is now live for nearby students.');
+        resetPostFlow();
         navigation.navigate('JobDetail', { jobId: newJob.id });
         return;
       }
@@ -482,8 +494,7 @@ export default function PostJobScreen({ navigation, route }) {
           ? 'Your item is now live for nearby students to buy.'
           : 'Your item is now live for nearby students to rent.'
       );
-      setForms((prev) => ({ ...prev, rental: buildInitialPostForm('rental') }));
-      setSelectedType(null);
+      resetPostFlow();
     } catch (error) {
       Alert.alert('Post failed', error.message || 'We could not publish your post right now.');
     } finally {
@@ -507,12 +518,7 @@ export default function PostJobScreen({ navigation, route }) {
           onPress: async () => {
             try {
               await removeOwnedListing(editingListing.id);
-              clearEditIntent();
-              setForms((prev) => ({
-                ...prev,
-                [editingListing.type]: buildInitialPostForm(editingListing.type),
-              }));
-              setSelectedType(null);
+              resetPostFlow();
               Alert.alert('Listing deleted', 'Your post has been removed.');
             } catch (error) {
               Alert.alert(
