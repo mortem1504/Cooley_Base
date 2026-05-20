@@ -17,7 +17,8 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_publishable_anon_key
 
 4. Open the SQL editor in the new Supabase project.
 5. For a brand-new project, run [schema.sql](C:/Users/PC/OneDrive/Documents/Cooley/supabase/schema.sql).
-6. For an existing project, apply only the missing files from [migrations](C:/Users/PC/OneDrive/Documents/Cooley/supabase/migrations).
+6. For an existing project, apply only the missing files from [migrations](C:/Users/Acer Nitro/Cooley_Base/supabase/migrations).
+   For the current app features, that includes [005_rental_request_flow.sql](C:/Users/Acer Nitro/Cooley_Base/supabase/migrations/005_rental_request_flow.sql) and [006_cancel_request_flow.sql](C:/Users/Acer Nitro/Cooley_Base/supabase/migrations/006_cancel_request_flow.sql) if they are not already installed.
 7. In Supabase Auth, enable Email auth and set your email confirmation preference.
 8. Restart Expo with cache clear:
 

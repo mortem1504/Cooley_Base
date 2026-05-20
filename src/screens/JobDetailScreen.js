@@ -323,6 +323,8 @@ export default function JobDetailScreen({ navigation, route }) {
     getOwnerApplicationsForJob,
     applyForJob,
     cancelJob,
+    cancelJobApplication,
+    cancelRentalBooking,
     instantAcceptJob,
     isListingPinned,
     isOwnerApplicationsLoading,
@@ -340,6 +342,8 @@ export default function JobDetailScreen({ navigation, route }) {
   } = useAppState();
   const [isOpeningChat, setIsOpeningChat] = useState(false);
   const [isUpdatingPin, setIsUpdatingPin] = useState(false);
+  const [isCancellingJobApplication, setIsCancellingJobApplication] = useState(false);
+  const [isCancellingRentalRequest, setIsCancellingRentalRequest] = useState(false);
   const [isRentalRequestLoading, setIsRentalRequestLoading] = useState(false);
   const [rentalRequest, setRentalRequest] = useState(null);
   const [rentalRequestNotice, setRentalRequestNotice] = useState('');
@@ -414,6 +418,10 @@ export default function JobDetailScreen({ navigation, route }) {
 
     if (myRentalRequest.status === 'completed') {
       return 'This rental is complete. Leave your review from the chat thread.';
+    }
+
+    if (myRentalRequest.status === 'cancelled') {
+      return 'This rental request was cancelled. You can send a new request while the listing stays available.';
     }
 
     return '';
@@ -601,6 +609,47 @@ export default function JobDetailScreen({ navigation, route }) {
       Alert.alert('Pin failed', error.message || 'We could not update this pinned listing.');
     } finally {
       setIsUpdatingPin(false);
+    }
+  };
+
+  const handleCancelJobApplication = async () => {
+    if (!job || !myApplication) {
+      return;
+    }
+
+    setIsCancellingJobApplication(true);
+
+    try {
+      await cancelJobApplication(job.id);
+      Alert.alert('Application cancelled', 'Your job application has been withdrawn.');
+    } catch (error) {
+      Alert.alert(
+        'Cancel failed',
+        error.message || 'We could not cancel your application right now.'
+      );
+    } finally {
+      setIsCancellingJobApplication(false);
+    }
+  };
+
+  const handleCancelRentalRequest = async () => {
+    if (!myRentalRequest) {
+      return;
+    }
+
+    setIsCancellingRentalRequest(true);
+
+    try {
+      await cancelRentalBooking(myRentalRequest.id);
+      await refreshRentalRequest();
+      Alert.alert('Request cancelled', 'Your rental request has been cancelled.');
+    } catch (error) {
+      Alert.alert(
+        'Cancel failed',
+        error.message || 'We could not cancel this rental request right now.'
+      );
+    } finally {
+      setIsCancellingRentalRequest(false);
     }
   };
 
@@ -980,11 +1029,39 @@ export default function JobDetailScreen({ navigation, route }) {
         ) : null}
 
         {!isOwnJob && myApplication?.status === 'pending' ? (
-          <AppButton disabled label="Application sent" variant="secondary" />
+          <>
+            <AppButton disabled label="Application sent" variant="secondary" />
+            <AppButton
+              disabled={isCancellingJobApplication}
+              label={isCancellingJobApplication ? 'Cancelling...' : 'Cancel application'}
+              onPress={handleCancelJobApplication}
+              variant="ghost"
+            />
+          </>
         ) : null}
 
         {!isOwnJob && myApplication?.status === 'accepted' ? (
-          <AppButton disabled label="You accepted this job" variant="secondary" />
+          <>
+            <AppButton disabled label="You accepted this job" variant="secondary" />
+            <AppButton
+              disabled={isCancellingJobApplication}
+              label={isCancellingJobApplication ? 'Cancelling...' : 'Cancel application'}
+              onPress={handleCancelJobApplication}
+              variant="ghost"
+            />
+          </>
+        ) : null}
+
+        {!isOwnJob &&
+        isRentListing &&
+        myRentalRequest &&
+        ['requested', 'accepted'].includes(myRentalRequest.status) ? (
+          <AppButton
+            disabled={isCancellingRentalRequest}
+            label={isCancellingRentalRequest ? 'Cancelling...' : 'Cancel rental request'}
+            onPress={handleCancelRentalRequest}
+            variant="ghost"
+          />
         ) : null}
 
         {!isOwnJob && !isItemListing && job.status === 'posted' && !myApplication ? (

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AppState } from 'react-native';
 import {
   applyToJobListing,
+  cancelJobApplication as cancelJobApplicationRecord,
   fetchMyJobApplications,
   fetchOwnerApplicationsForListing,
   reviewOwnerApplication,
@@ -37,6 +38,7 @@ import {
 } from '../services/listingsService';
 import {
   advanceRentalBookingStage,
+  cancelRentalBooking as cancelRentalBookingRecord,
   fetchRentalRequestByListing,
   fetchRentalRequestByThread,
   requestRentalBooking as requestRentalBookingRecord,
@@ -196,7 +198,11 @@ export function AppProvider({ children }) {
     () =>
       dedupeById(
         jobs.map((job) => {
-          const myApplication = jobApplications[job.id] || null;
+          const rawApplication = jobApplications[job.id] || null;
+          const myApplication =
+            rawApplication && ['pending', 'accepted'].includes(rawApplication.status)
+              ? rawApplication
+              : null;
           const liveDistance =
             viewerLocation &&
             isValidCoordinate(job.latitude) &&
@@ -1372,6 +1378,18 @@ export function AppProvider({ children }) {
     }
   };
 
+  const cancelRentalBooking = async (requestId) => {
+    try {
+      const result = await cancelRentalBookingRecord(requestId);
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
   const reviewRentalBooking = async (requestId, nextStatus) => {
     try {
       const result = await reviewRentalBookingRecord(requestId, nextStatus);
@@ -1491,13 +1509,46 @@ export function AppProvider({ children }) {
 
   const instantAcceptJob = (jobId) => submitJobApplication(jobId, true);
 
+  const cancelJobApplication = async (listingId) => {
+    const currentApplication = jobApplications[listingId];
+
+    if (!currentApplication?.id) {
+      throw new Error('There is no active application to cancel for this job.');
+    }
+
+    try {
+      const result = await cancelJobApplicationRecord(currentApplication.id);
+
+      setJobApplications((prev) => ({
+        ...prev,
+        [listingId]: result.application,
+      }));
+      setJobs((prev) => upsertById(prev, result.listing));
+      setListingsNotice('');
+      setApplicationsNotice('');
+      return result;
+    } catch (error) {
+      setListingsNotice(error.message);
+      setApplicationsNotice(error.message);
+      throw error;
+    }
+  };
+
   const cancelJob = (jobId) => updateJobStatus(jobId, 'cancelled');
 
   const getJobById = (jobId) =>
     jobsWithViewerState.find((job) => job.id === jobId) ||
     rentalsWithViewerState.find((rental) => rental.id === jobId);
 
-  const getMyApplicationForJob = (jobId) => jobApplications[jobId] || null;
+  const getMyApplicationForJob = (jobId) => {
+    const application = jobApplications[jobId] || null;
+
+    if (!application) {
+      return null;
+    }
+
+    return ['pending', 'accepted'].includes(application.status) ? application : null;
+  };
 
   const reviewApplicationForOwnedJob = async (applicationId, nextStatus) => {
     try {
@@ -1548,6 +1599,8 @@ export function AppProvider({ children }) {
         authNotice,
         applicationsNotice,
         cancelJob,
+        cancelJobApplication,
+        cancelRentalBooking,
         currentUser,
         continueWithGoogle,
         filteredJobs,
