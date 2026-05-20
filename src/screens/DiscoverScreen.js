@@ -48,11 +48,15 @@ function matchesDiscoverSearch(listing, query) {
 }
 
 function getListingGroup(listing) {
-  if (
-    listing?.type === 'rental' ||
-    listing?.listingMode === 'rent' ||
-    listing?.listingMode === 'sell'
-  ) {
+  if (listing?.type === 'rental') {
+    return 'item';
+  }
+
+  if (listing?.type === 'job') {
+    return 'job';
+  }
+
+  if (listing?.listingMode === 'rent' || listing?.listingMode === 'sell') {
     return 'item';
   }
 
