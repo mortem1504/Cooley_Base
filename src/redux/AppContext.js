@@ -53,6 +53,10 @@ import {
   emptyUserProfile,
   updateProfileById,
 } from '../services/profileService';
+import {
+  loadPinnedListingIds,
+  savePinnedListingIds,
+} from '../services/pinnedListingsService';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 const AppContext = createContext(null);
@@ -181,6 +185,7 @@ export function AppProvider({ children }) {
   const [isMessagesLoadingByThread, setIsMessagesLoadingByThread] = useState({});
   const [threadsNotice, setThreadsNotice] = useState('');
   const [messageNoticeByThread, setMessageNoticeByThread] = useState({});
+  const [pinnedListingIds, setPinnedListingIds] = useState([]);
   const [filters, setFilters] = useState(buildDefaultFilters);
   const ownerApplicationsCacheRef = useRef({});
   const isThreadSyncInFlightRef = useRef(false);
@@ -246,6 +251,20 @@ export function AppProvider({ children }) {
       ),
     [filters, jobsWithViewerState]
   );
+  const allListings = useMemo(
+    () =>
+      dedupeById([...jobsWithViewerState, ...rentalsWithViewerState]).sort(
+        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
+      ),
+    [jobsWithViewerState, rentalsWithViewerState]
+  );
+  const pinnedListings = useMemo(
+    () =>
+      pinnedListingIds
+        .map((listingId) => allListings.find((listing) => listing.id === listingId))
+        .filter(Boolean),
+    [allListings, pinnedListingIds]
+  );
   const isAuthenticated = Boolean(session?.user);
   const threads = useMemo(
     () => [...messageThreads].sort((first, second) => second.updatedAt - first.updatedAt),
@@ -300,6 +319,41 @@ export function AppProvider({ children }) {
   useEffect(() => {
     ownerApplicationsCacheRef.current = ownerApplicationsByListing;
   }, [ownerApplicationsByListing]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function hydratePinnedListings() {
+      const activeUserId = session?.user?.id || currentUser.id;
+
+      if (!activeUserId) {
+        if (isMounted) {
+          setPinnedListingIds([]);
+        }
+        return;
+      }
+
+      try {
+        const nextPinnedListingIds = await loadPinnedListingIds(activeUserId);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setPinnedListingIds(nextPinnedListingIds);
+      } catch (_error) {
+        if (isMounted) {
+          setPinnedListingIds([]);
+        }
+      }
+    }
+
+    hydratePinnedListings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.id, session?.user?.id]);
 
   const refreshViewerLocation = async () => {
     setIsLocationLoading(true);
@@ -940,6 +994,7 @@ export function AppProvider({ children }) {
       setIsMessagesLoadingByThread({});
       setIsThreadsLoading(false);
       setThreadsNotice('');
+      setPinnedListingIds([]);
       setAuthNotice('');
       return { ok: true };
     } catch (error) {
@@ -1083,6 +1138,17 @@ export function AppProvider({ children }) {
         delete nextApplications[listingId];
         return nextApplications;
       });
+      setPinnedListingIds((prev) => {
+        if (!prev.includes(listingId)) {
+          return prev;
+        }
+
+        const nextPinnedListingIds = prev.filter((id) => id !== listingId);
+        savePinnedListingIds(session?.user?.id || currentUser.id, nextPinnedListingIds).catch(
+          () => {}
+        );
+        return nextPinnedListingIds;
+      });
       setListingsNotice('');
       setApplicationsNotice('');
       return { ok: true };
@@ -1093,6 +1159,30 @@ export function AppProvider({ children }) {
   };
 
   const getThreadById = (threadId) => threads.find((thread) => thread.id === threadId);
+
+  const isListingPinned = (listingId) => pinnedListingIds.includes(listingId);
+
+  const togglePinnedListing = async (listingId) => {
+    const activeUserId = session?.user?.id || currentUser.id;
+
+    if (!activeUserId) {
+      throw new Error('Log in first to pin listings.');
+    }
+
+    const nextPinnedListingIds = isListingPinned(listingId)
+      ? pinnedListingIds.filter((id) => id !== listingId)
+      : [listingId, ...pinnedListingIds.filter((id) => id !== listingId)];
+
+    setPinnedListingIds(nextPinnedListingIds);
+
+    try {
+      await savePinnedListingIds(activeUserId, nextPinnedListingIds);
+      return nextPinnedListingIds.includes(listingId);
+    } catch (error) {
+      setPinnedListingIds(pinnedListingIds);
+      throw new Error(error.message || 'We could not update your pinned listings right now.');
+    }
+  };
 
   const getMessagesForThread = (threadId) => messagesByThread[threadId] || [];
 
@@ -1476,6 +1566,7 @@ export function AppProvider({ children }) {
         isListingsLoading,
         isLocationLoading,
         isOwnerApplicationsLoading,
+        isListingPinned,
         isThreadMessagesLoading,
         isThreadsLoading,
         jobs: jobsWithViewerState,
@@ -1490,6 +1581,7 @@ export function AppProvider({ children }) {
         myListings,
         openJobChat,
         openApplicationChat,
+        pinnedListings,
         postJob,
         postRental,
         requestRentalBooking,
@@ -1506,6 +1598,7 @@ export function AppProvider({ children }) {
         submitRentalReviewForRequest,
         threads,
         threadsNotice,
+        togglePinnedListing,
         unreadThreadCount,
         updateCurrentUserProfile,
         updateOwnedListing,

@@ -324,6 +324,7 @@ export default function JobDetailScreen({ navigation, route }) {
     applyForJob,
     cancelJob,
     instantAcceptJob,
+    isListingPinned,
     isOwnerApplicationsLoading,
     loadOwnerApplicationsForJob,
     loadRentalRequestForListing,
@@ -333,10 +334,12 @@ export default function JobDetailScreen({ navigation, route }) {
     reviewApplicationForOwnedJob,
     reviewRentalBooking,
     threads,
+    togglePinnedListing,
     updateJobStatus,
     updateRentalBookingStage,
   } = useAppState();
   const [isOpeningChat, setIsOpeningChat] = useState(false);
+  const [isUpdatingPin, setIsUpdatingPin] = useState(false);
   const [isRentalRequestLoading, setIsRentalRequestLoading] = useState(false);
   const [rentalRequest, setRentalRequest] = useState(null);
   const [rentalRequestNotice, setRentalRequestNotice] = useState('');
@@ -355,6 +358,7 @@ export default function JobDetailScreen({ navigation, route }) {
   const currentIndex = statusFlow.indexOf(job?.status);
   const canAdvance = !isItemListing && currentIndex >= 0 && currentIndex < statusFlow.length - 1;
   const isOwnJob = job?.createdBy === currentUser.id;
+  const isPinned = job ? isListingPinned(job.id) : false;
   const myApplication = isItemListing ? null : getMyApplicationForJob(jobId);
   const ownerApplications = isItemListing ? [] : getOwnerApplicationsForJob(jobId);
   const isLoadingOwnerApplications = isItemListing ? false : isOwnerApplicationsLoading(jobId);
@@ -581,6 +585,22 @@ export default function JobDetailScreen({ navigation, route }) {
         'Cancel failed',
         error.message || `We could not cancel this ${isItemListing ? 'listing' : 'job'}.`
       );
+    }
+  };
+
+  const handleTogglePin = async () => {
+    if (!job) {
+      return;
+    }
+
+    setIsUpdatingPin(true);
+
+    try {
+      await togglePinnedListing(job.id);
+    } catch (error) {
+      Alert.alert('Pin failed', error.message || 'We could not update this pinned listing.');
+    } finally {
+      setIsUpdatingPin(false);
     }
   };
 
@@ -930,6 +950,19 @@ export default function JobDetailScreen({ navigation, route }) {
       ) : null}
 
       <View style={styles.actions}>
+        <AppButton
+          disabled={isUpdatingPin}
+          label={
+            isUpdatingPin
+              ? 'Updating pin...'
+              : isPinned
+                ? 'Remove pin'
+                : 'Pin listing'
+          }
+          onPress={handleTogglePin}
+          variant="secondary"
+        />
+
         {!isOwnJob ? (
           <>
             <AppButton
