@@ -17,6 +17,7 @@ import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { requestListingCopilotSuggestions } from '../services/listingCopilotService';
 import { TAB_ROUTES } from '../navigation/routes';
 import { resolveAddressFromInput } from '../services/locationService';
 import {
@@ -74,6 +75,24 @@ function CategoryChip({ active, label, onPress }) {
 
 function SectionLabel({ children }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
+}
+
+function CopilotSuggestionRow({ label, onApply, value }) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    <View style={styles.copilotSuggestionRow}>
+      <View style={styles.copilotSuggestionCopy}>
+        <Text style={styles.copilotSuggestionLabel}>{label}</Text>
+        <Text style={styles.copilotSuggestionValue}>{value}</Text>
+      </View>
+      <Pressable onPress={onApply} style={styles.copilotApplyChip}>
+        <Text style={styles.copilotApplyChipText}>Apply</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 function formatStatus(status) {
@@ -163,6 +182,10 @@ export default function PostJobScreen({ navigation, route }) {
   const [selectedType, setSelectedType] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [copilotPrompt, setCopilotPrompt] = useState('');
+  const [copilotSuggestion, setCopilotSuggestion] = useState(null);
+  const [copilotNotice, setCopilotNotice] = useState('');
+  const [isGeneratingCopilot, setIsGeneratingCopilot] = useState(false);
   const [forms, setForms] = useState({
     job: buildInitialPostForm('job'),
     rental: buildInitialPostForm('rental'),
@@ -176,6 +199,10 @@ export default function PostJobScreen({ navigation, route }) {
       job: buildInitialPostForm('job'),
       rental: buildInitialPostForm('rental'),
     });
+    setCopilotPrompt('');
+    setCopilotSuggestion(null);
+    setCopilotNotice('');
+    setIsGeneratingCopilot(false);
     setSelectedType(null);
     clearEditIntent();
   };
@@ -208,6 +235,8 @@ export default function PostJobScreen({ navigation, route }) {
       ...prev,
       [editingListing.type]: buildPostFormFromListing(editingListing),
     }));
+    setCopilotSuggestion(null);
+    setCopilotNotice('');
   }, [editingListing]);
 
   useEffect(() => {
@@ -238,6 +267,9 @@ export default function PostJobScreen({ navigation, route }) {
       ...prev,
       [listing.type]: buildPostFormFromListing(listing),
     }));
+    setCopilotPrompt('');
+    setCopilotSuggestion(null);
+    setCopilotNotice('');
   };
 
   const updateForm = (key, value) => {
@@ -257,6 +289,16 @@ export default function PostJobScreen({ navigation, route }) {
         ...prev[selectedType],
         location: value,
         locationDetails: null,
+      },
+    }));
+  };
+
+  const setFormValues = (updater) => {
+    setForms((prev) => ({
+      ...prev,
+      [selectedType]: {
+        ...prev[selectedType],
+        ...updater(prev[selectedType]),
       },
     }));
   };
@@ -305,6 +347,8 @@ export default function PostJobScreen({ navigation, route }) {
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     updateForm('listingMode', nextMode);
+    setCopilotSuggestion(null);
+    setCopilotNotice('');
   };
 
   const goBack = () => {
@@ -413,6 +457,75 @@ export default function PostJobScreen({ navigation, route }) {
     } finally {
       setIsResolvingLocation(false);
     }
+  };
+
+  const handleGenerateCopilot = async () => {
+    if (!selectedType || !activeForm) {
+      return;
+    }
+
+    setIsGeneratingCopilot(true);
+    setCopilotNotice('');
+
+    try {
+      const nextSuggestion = await requestListingCopilotSuggestions({
+        budget: activeForm.budget,
+        category: activeForm.category,
+        description: activeForm.description,
+        duration: isDurationRequired ? activeForm.duration : '',
+        listingMode: currentItemListingMode,
+        listingType: selectedType,
+        location: activeForm.location,
+        prompt: copilotPrompt,
+        title: activeForm.title,
+        urgent: activeForm.urgent,
+      });
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setCopilotSuggestion(nextSuggestion);
+    } catch (error) {
+      setCopilotNotice(
+        error.message || 'AI Listing Copilot could not prepare a suggestion right now.'
+      );
+    } finally {
+      setIsGeneratingCopilot(false);
+    }
+  };
+
+  const applyCopilotField = (field) => {
+    if (!copilotSuggestion) {
+      return;
+    }
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setFormValues(() => {
+      if (field === 'all') {
+        return {
+          budget: copilotSuggestion.budget || activeForm.budget,
+          category: copilotSuggestion.category || activeForm.category,
+          description: copilotSuggestion.description || activeForm.description,
+          duration: isDurationRequired
+            ? copilotSuggestion.duration || activeForm.duration
+            : activeForm.duration,
+          title: copilotSuggestion.title || activeForm.title,
+          urgent: copilotSuggestion.urgent,
+        };
+      }
+
+      if (field === 'duration' && !isDurationRequired) {
+        return {};
+      }
+
+      return {
+        [field]: copilotSuggestion[field],
+      };
+    });
+  };
+
+  const clearCopilotSuggestion = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setCopilotSuggestion(null);
+    setCopilotNotice('');
   };
 
   const submit = async () => {
@@ -547,7 +660,15 @@ export default function PostJobScreen({ navigation, route }) {
 
         <View style={styles.typeCardColumn}>
           {postTypeOptions.map((option) => (
-            <PostTypeCard key={option.key} onPress={() => setSelectedType(option.key)} option={option} />
+            <PostTypeCard
+              key={option.key}
+              onPress={() => {
+                setSelectedType(option.key);
+                setCopilotSuggestion(null);
+                setCopilotNotice('');
+              }}
+              option={option}
+            />
           ))}
         </View>
 
@@ -597,12 +718,113 @@ export default function PostJobScreen({ navigation, route }) {
             <PostTypeTab
               active={selectedType === option.key}
               key={option.key}
-              onPress={() => setSelectedType(option.key)}
+              onPress={() => {
+                setSelectedType(option.key);
+                setCopilotSuggestion(null);
+                setCopilotNotice('');
+              }}
               title={option.title}
             />
           ))}
         </View>
       ) : null}
+
+      <AppCard style={styles.copilotCard}>
+        <View style={styles.copilotHeader}>
+          <View style={styles.copilotHeaderCopy}>
+            <Text style={styles.copilotTitle}>AI Listing Copilot</Text>
+            <Text style={styles.copilotSubtitle}>
+              Turn a rough idea into a stronger title, description, category, and pricing draft.
+            </Text>
+          </View>
+          {copilotSuggestion ? (
+            <Pressable onPress={clearCopilotSuggestion}>
+              <Text style={styles.copilotClearLink}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <AppTextInput
+          multiline
+          onChangeText={setCopilotPrompt}
+          placeholder={
+            selectedType === 'job'
+              ? 'Optional prompt: Need help moving 8 boxes from dorm to nearby apartment tonight'
+              : currentItemListingMode === 'sell'
+                ? 'Optional prompt: Selling a used camera with lens and charger'
+                : 'Optional prompt: Renting out a camera for weekend shoots near campus'
+          }
+          style={styles.copilotPromptInput}
+          value={copilotPrompt}
+        />
+
+        <View style={styles.copilotActionRow}>
+          <AppButton
+            disabled={isGeneratingCopilot}
+            label={isGeneratingCopilot ? 'Generating...' : 'Improve with AI'}
+            onPress={handleGenerateCopilot}
+            style={styles.copilotPrimaryButton}
+          />
+          {copilotSuggestion ? (
+            <AppButton
+              label="Apply all"
+              onPress={() => applyCopilotField('all')}
+              style={styles.copilotSecondaryButton}
+              variant="secondary"
+            />
+          ) : null}
+        </View>
+
+        {copilotNotice ? <Text style={styles.copilotNotice}>{copilotNotice}</Text> : null}
+
+        {copilotSuggestion ? (
+          <View style={styles.copilotSuggestionSection}>
+            <CopilotSuggestionRow
+              label="Title"
+              onApply={() => applyCopilotField('title')}
+              value={copilotSuggestion.title}
+            />
+            <CopilotSuggestionRow
+              label="Description"
+              onApply={() => applyCopilotField('description')}
+              value={copilotSuggestion.description}
+            />
+            <CopilotSuggestionRow
+              label="Category"
+              onApply={() => applyCopilotField('category')}
+              value={copilotSuggestion.category}
+            />
+            <CopilotSuggestionRow
+              label={selectedType === 'job' ? 'Budget' : currentItemListingMode === 'sell' ? 'Price' : 'Rate'}
+              onApply={() => applyCopilotField('budget')}
+              value={copilotSuggestion.budget}
+            />
+            {isDurationRequired ? (
+              <CopilotSuggestionRow
+                label="Duration"
+                onApply={() => applyCopilotField('duration')}
+                value={copilotSuggestion.duration}
+              />
+            ) : null}
+            <CopilotSuggestionRow
+              label="Urgency"
+              onApply={() => applyCopilotField('urgent')}
+              value={copilotSuggestion.urgent ? 'Mark as urgent / available now' : 'Keep normal urgency'}
+            />
+
+            {copilotSuggestion.qualityWarnings.length ? (
+              <View style={styles.copilotWarningsWrap}>
+                <Text style={styles.copilotWarningsTitle}>What to tighten before posting</Text>
+                {copilotSuggestion.qualityWarnings.map((warning) => (
+                  <Text key={warning} style={styles.copilotWarningItem}>
+                    - {warning}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </AppCard>
 
       <AppCard style={styles.photoCard}>
         <View style={styles.photoHeader}>
@@ -923,6 +1145,112 @@ const styles = StyleSheet.create({
   },
   currentListingsColumn: {
     gap: 12,
+  },
+  copilotCard: {
+    gap: 14,
+    padding: 18,
+  },
+  copilotHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  copilotHeaderCopy: {
+    flex: 1,
+  },
+  copilotTitle: {
+    color: '#1D2433',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  copilotSubtitle: {
+    color: '#7B8596',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  copilotClearLink: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  copilotPromptInput: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+  copilotActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  copilotPrimaryButton: {
+    flex: 1,
+  },
+  copilotSecondaryButton: {
+    minWidth: 108,
+  },
+  copilotNotice: {
+    color: colors.danger,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  copilotSuggestionSection: {
+    gap: 10,
+  },
+  copilotSuggestionRow: {
+    alignItems: 'flex-start',
+    backgroundColor: '#F4F7FD',
+    borderColor: '#D9E2F2',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+  },
+  copilotSuggestionCopy: {
+    flex: 1,
+    gap: 6,
+  },
+  copilotSuggestionLabel: {
+    color: '#718096',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  copilotSuggestionValue: {
+    color: '#243040',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  copilotApplyChip: {
+    backgroundColor: '#EAF2FF',
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  copilotApplyChipText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  copilotWarningsWrap: {
+    backgroundColor: '#FFF7EA',
+    borderColor: '#F3D7A7',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 6,
+    padding: 14,
+  },
+  copilotWarningsTitle: {
+    color: '#8A5B00',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  copilotWarningItem: {
+    color: '#6E5A34',
+    fontSize: 13,
+    lineHeight: 19,
   },
   currentListingsEmpty: {
     color: '#7B8596',

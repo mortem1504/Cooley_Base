@@ -47,6 +47,35 @@ After running the schema, verify these exist in the new project:
 - `rental_requests`
 - `rental_reviews`
 
+## AI Listing Copilot
+
+The Listing Copilot uses a Supabase Edge Function at
+[supabase/functions/listing-copilot/index.ts](C:/Users/Acer%20Nitro/Cooley_Base/supabase/functions/listing-copilot/index.ts).
+
+To enable it:
+
+1. Set the OpenAI key as a Supabase secret:
+
+```bash
+supabase secrets set OPENAI_API_KEY=your_openai_api_key
+```
+
+2. Optionally set a model override:
+
+```bash
+supabase secrets set OPENAI_MODEL=gpt-4o-mini
+```
+
+3. Deploy the function:
+
+```bash
+supabase functions deploy listing-copilot
+```
+
+4. Make sure your app is already using the same Supabase project in `.env`.
+
+The mobile app calls the function through the shared Supabase client, so the OpenAI API key never ships to the device.
+
 ## Files Related To Supabase
 
 - [`.env.example`](C:/Users/PC/OneDrive/Documents/Cooley/.env.example)
