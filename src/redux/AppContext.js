@@ -354,22 +354,6 @@ export function AppProvider({ children }) {
     return [...postedJobs, ...postedRentals].sort((first, second) => second.createdAt - first.createdAt);
   }, [currentUser.id, jobs, rentals]);
 
-  const allListings = useMemo(
-    () =>
-      dedupeById([...jobsWithViewerState, ...rentalsWithViewerState]).sort(
-        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
-      ),
-    [jobsWithViewerState, rentalsWithViewerState]
-  );
-
-  const pinnedListings = useMemo(
-    () =>
-      pinnedListingIds
-        .map((listingId) => allListings.find((listing) => listing.id === listingId))
-        .filter(Boolean),
-    [allListings, pinnedListingIds]
-  );
-
   useEffect(() => {
     ownerApplicationsCacheRef.current = ownerApplicationsByListing;
   }, [ownerApplicationsByListing]);
