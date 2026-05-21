@@ -49,32 +49,18 @@ After running the schema, verify these exist in the new project:
 
 ## AI Listing Copilot
 
-The Listing Copilot uses a Supabase Edge Function at
-[supabase/functions/listing-copilot/index.ts](C:/Users/Acer%20Nitro/Cooley_Base/supabase/functions/listing-copilot/index.ts).
+The current prototype uses a local rule-based copilot in
+[src/services/listingCopilotService.js](C:/Users/Acer%20Nitro/Cooley_Base/src/services/listingCopilotService.js).
 
-To enable it:
+That means:
 
-1. Set the OpenAI key as a Supabase secret:
+- no OpenAI API key is required
+- no Edge Function deployment is required
+- the `Improve with AI` button works entirely inside the app for prototype use
 
-```bash
-supabase secrets set OPENAI_API_KEY=your_openai_api_key
-```
-
-2. Optionally set a model override:
-
-```bash
-supabase secrets set OPENAI_MODEL=gpt-4o-mini
-```
-
-3. Deploy the function:
-
-```bash
-supabase functions deploy listing-copilot
-```
-
-4. Make sure your app is already using the same Supabase project in `.env`.
-
-The mobile app calls the function through the shared Supabase client, so the OpenAI API key never ships to the device.
+The older Edge Function file at
+[supabase/functions/listing-copilot/index.ts](C:/Users/Acer%20Nitro/Cooley_Base/supabase/functions/listing-copilot/index.ts)
+can stay in the repo for future experimentation, but it is not required for the current prototype flow.
 
 ## Files Related To Supabase
 
