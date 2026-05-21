@@ -1,7 +1,7 @@
 import { formatMetaLine, formatPrice, titleCase } from './formatters';
 
-export function formatJobPrice(price) {
-  return formatPrice(price);
+export function formatJobPrice(price, priceCurrency = 'USD', options = {}) {
+  return formatPrice(price, priceCurrency, options);
 }
 
 export function getListingBadgeVariant(job) {

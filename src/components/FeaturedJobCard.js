@@ -1,8 +1,9 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing } from '../utils/theme';
-import { formatJobPrice, formatJobSummaryMeta } from '../utils/jobFormatters';
+import { formatJobSummaryMeta } from '../utils/jobFormatters';
 import AppCard from './AppCard';
+import PriceDisplay from './PriceDisplay';
 
 export default function FeaturedJobCard({ job, onPress }) {
   return (
@@ -14,7 +15,7 @@ export default function FeaturedJobCard({ job, onPress }) {
             <Text style={styles.category}>{job.category}</Text>
             {job.urgent ? <Text style={styles.urgent}>Urgent</Text> : null}
           </View>
-          <Text style={styles.price}>{formatJobPrice(job.price)}</Text>
+          <PriceDisplay amount={job.price} currency="USD" size="md" align="right" />
         </View>
         <Text style={styles.title}>{job.title}</Text>
         <Text style={styles.meta}>{formatJobSummaryMeta(job)}</Text>

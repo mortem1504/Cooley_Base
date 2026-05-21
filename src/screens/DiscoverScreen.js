@@ -111,6 +111,7 @@ export default function DiscoverScreen({ navigation }) {
     jobs,
     listingsNotice,
     locationNotice,
+    preferredCurrency,
     refreshViewerLocation,
     rentals,
     resetFilters,
@@ -147,7 +148,7 @@ export default function DiscoverScreen({ navigation }) {
           listingDistance <= filters.maxDistance
         );
       }),
-    [allListings, filters.maxDistance, filters.maxPrice, filters.search, selectedListingFilter]
+    [allListings, filters.maxDistance, filters.maxPrice, filters.search, selectedListingFilter, preferredCurrency]
   );
   const mappableListings = useMemo(
     () =>
@@ -229,11 +230,6 @@ export default function DiscoverScreen({ navigation }) {
       <View style={[styles.heroWrap, { paddingTop: topInset }]}>
         <AppCard style={styles.heroCard}>
           <Text style={styles.greeting}>Hello, {firstName}</Text>
-          <Text style={styles.heading}>Discover nearby jobs and item listings.</Text>
-          <Text style={styles.subheading}>
-            Switch between cards and the map, then narrow the feed to just jobs, just items,
-            or everything nearby.
-          </Text>
           <AppTextInput
             onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
             placeholder="Search jobs, cameras, books, delivery, moving"
@@ -487,17 +483,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
-  },
-  heading: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: '800',
-    lineHeight: 34,
-  },
-  subheading: {
-    color: colors.secondaryText,
-    fontSize: 14,
-    lineHeight: 22,
   },
   stickyHeader: {
     backgroundColor: colors.background,

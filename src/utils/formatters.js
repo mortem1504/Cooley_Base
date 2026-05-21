@@ -1,3 +1,5 @@
+import { formatPriceWithConversion } from './currency';
+
 export function capitalize(value) {
   if (!value) {
     return '';
@@ -22,6 +24,6 @@ export function formatMetaLine(items) {
   return items.filter(Boolean).join(' - ');
 }
 
-export function formatPrice(amount) {
-  return `$${amount}`;
+export function formatPrice(amount, priceCurrency = 'USD', options = {}) {
+  return formatPriceWithConversion(amount, priceCurrency, options);
 }

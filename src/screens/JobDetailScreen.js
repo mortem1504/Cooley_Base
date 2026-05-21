@@ -3,6 +3,7 @@ import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'rea
 import AppButton from '../components/AppButton';
 import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
+import PriceDisplay from '../components/PriceDisplay';
 import UserAvatar from '../components/UserAvatar';
 import useAppState from '../hooks/useAppState';
 import { ROOT_ROUTES, TAB_ROUTES } from '../navigation/routes';
@@ -245,7 +246,12 @@ function BookingSummaryCard({
             </View>
             <View style={styles.infoTile}>
               <Text style={styles.infoLabel}>Total</Text>
-              <Text style={styles.infoValue}>{formatRentalPrice(booking.totalPrice)}</Text>
+              <PriceDisplay
+                amount={booking.totalPrice}
+                currency="USD"
+                size="sm"
+                priceStyle={styles.infoValue}
+              />
             </View>
           </View>
 
@@ -749,9 +755,13 @@ export default function JobDetailScreen({ navigation, route }) {
             <Text style={styles.category}>{job.category}</Text>
             <Text style={styles.title}>{job.title}</Text>
           </View>
-          <Text style={styles.price}>
-            {isRentListing ? `${formatJobPrice(job.price)}/day` : formatJobPrice(job.price)}
-          </Text>
+          <PriceDisplay
+            amount={job.price}
+            currency="USD"
+            size="lg"
+            align="right"
+            suffix={isRentListing ? '/day' : ''}
+          />
         </View>
         <Text style={styles.description}>{job.description}</Text>
         <Text style={styles.metaText}>Address: {job.location}</Text>
@@ -875,9 +885,16 @@ export default function JobDetailScreen({ navigation, route }) {
             </View>
             <View style={styles.infoTile}>
               <Text style={styles.infoLabel}>Total</Text>
-              <Text style={styles.infoValue}>
-                {requestTotal === null ? 'Enter dates' : formatRentalPrice(requestTotal)}
-              </Text>
+              {requestTotal === null ? (
+                <Text style={styles.infoValue}>Enter dates</Text>
+              ) : (
+                <PriceDisplay
+                  amount={requestTotal}
+                  currency="USD"
+                  size="sm"
+                  priceStyle={styles.infoValue}
+                />
+              )}
             </View>
           </View>
 

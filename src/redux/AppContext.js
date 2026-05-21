@@ -44,6 +44,20 @@ import {
   submitRentalReview as submitRentalReviewRecord,
 } from '../services/rentalService';
 import {
+  fetchWalletTransactions,
+  getOrCreateWallet,
+  payForJob as payForJobService,
+  releaseJobPayment as releaseJobPaymentService,
+  requestWithdrawal as requestWithdrawalService,
+  topUpWallet as topUpWalletService,
+} from '../services/walletService';
+import {
+  CURRENCY_LIST,
+  getAppCurrency,
+  loadAppCurrency,
+  setAppCurrency as setAppCurrencyUtil,
+} from '../utils/currency';
+import {
   calculateDistanceKm,
   getCurrentLocationSnapshot,
   isValidCoordinate,
@@ -58,6 +72,7 @@ import { getSupabaseClient } from '../services/supabaseClient';
 const AppContext = createContext(null);
 const DEFAULT_MAX_DISTANCE_KM = 25;
 const DEFAULT_MAX_PRICE = 500;
+const AUTH_HYDRATION_TIMEOUT_MS = 8000;
 
 function buildDefaultFilters() {
   return {
@@ -149,12 +164,24 @@ async function hydrateCurrentUser(authUser) {
     return emptyUserProfile;
   }
 
+  const fallbackProfile = buildCurrentUserProfile(authUser, null);
+
   try {
-    await ensureProfileForUser(authUser);
-    const profile = await fetchProfileById(authUser.id);
+    const profile = await Promise.race([
+      (async () => {
+        await ensureProfileForUser(authUser);
+        return fetchProfileById(authUser.id);
+      })(),
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(null);
+        }, AUTH_HYDRATION_TIMEOUT_MS);
+      }),
+    ]);
+
     return buildCurrentUserProfile(authUser, profile);
   } catch (error) {
-    return buildCurrentUserProfile(authUser, null);
+    return fallbackProfile;
   }
 }
 
@@ -181,6 +208,11 @@ export function AppProvider({ children }) {
   const [isMessagesLoadingByThread, setIsMessagesLoadingByThread] = useState({});
   const [threadsNotice, setThreadsNotice] = useState('');
   const [messageNoticeByThread, setMessageNoticeByThread] = useState({});
+  const [wallet, setWallet] = useState(null);
+  const [walletTransactions, setWalletTransactions] = useState([]);
+  const [isWalletLoading, setIsWalletLoading] = useState(false);
+  const [walletNotice, setWalletNotice] = useState('');
+  const [preferredCurrency, setPreferredCurrency] = useState(getAppCurrency());
   const [filters, setFilters] = useState(buildDefaultFilters);
   const ownerApplicationsCacheRef = useRef({});
   const isThreadSyncInFlightRef = useRef(false);
@@ -808,24 +840,33 @@ export function AppProvider({ children }) {
           return;
         }
 
-        setSession(nextSession ?? null);
-        setAuthNotice('');
+        try {
+          setSession(nextSession ?? null);
+          setAuthNotice('');
 
-        if (nextSession?.user) {
-          setIsAuthLoading(true);
-          const hydratedUser = await hydrateCurrentUser(nextSession.user);
+          if (nextSession?.user) {
+            setIsAuthLoading(true);
+            const hydratedUser = await hydrateCurrentUser(nextSession.user);
 
+            if (!isMounted) {
+              return;
+            }
+
+            setCurrentUser(hydratedUser);
+          } else {
+            setCurrentUser(emptyUserProfile);
+          }
+        } catch (error) {
           if (!isMounted) {
             return;
           }
 
-          setCurrentUser(hydratedUser);
-        } else {
           setCurrentUser(emptyUserProfile);
-        }
-
-        if (isMounted) {
-          setIsAuthLoading(false);
+          setAuthNotice(error.message || 'We could not finish loading your account.');
+        } finally {
+          if (isMounted) {
+            setIsAuthLoading(false);
+          }
         }
       });
 
@@ -940,6 +981,10 @@ export function AppProvider({ children }) {
       setIsMessagesLoadingByThread({});
       setIsThreadsLoading(false);
       setThreadsNotice('');
+      setWallet(null);
+      setWalletTransactions([]);
+      setWalletNotice('');
+      setIsWalletLoading(false);
       setAuthNotice('');
       return { ok: true };
     } catch (error) {
@@ -1451,6 +1496,101 @@ export function AppProvider({ children }) {
     };
   };
 
+  // --- Currency actions ---
+
+  const changePreferredCurrency = async (currencyCode) => {
+    await setAppCurrencyUtil(currencyCode);
+    setPreferredCurrency(currencyCode);
+  };
+
+  useEffect(() => {
+    loadAppCurrency().then((loaded) => {
+      setPreferredCurrency(loaded);
+    });
+  }, []);
+
+  // --- Wallet actions ---
+
+  const loadWallet = async () => {
+    setIsWalletLoading(true);
+    setWalletNotice('');
+
+    try {
+      const walletData = await getOrCreateWallet();
+      setWallet(walletData);
+      setWalletNotice('');
+      return walletData;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    } finally {
+      setIsWalletLoading(false);
+    }
+  };
+
+  const loadWalletTransactions = async (limit = 50, offset = 0) => {
+    try {
+      const transactions = await fetchWalletTransactions(limit, offset);
+      setWalletTransactions(transactions);
+      setWalletNotice('');
+      return transactions;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    }
+  };
+
+  const topUpWallet = async (amount, description) => {
+    try {
+      const result = await topUpWalletService(amount, description);
+      setWallet((prev) => prev ? { ...prev, balance: result.newBalance } : prev);
+      await loadWalletTransactions();
+      setWalletNotice('');
+      return result;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    }
+  };
+
+  const withdrawFromWallet = async ({ amount, bankName, accountNumber, accountHolder }) => {
+    try {
+      const result = await requestWithdrawalService({ amount, bankName, accountNumber, accountHolder });
+      setWallet((prev) => prev ? { ...prev, balance: result.newBalance } : prev);
+      await loadWalletTransactions();
+      setWalletNotice('');
+      return result;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    }
+  };
+
+  const payForJobFromWallet = async (listingId) => {
+    try {
+      const result = await payForJobService(listingId);
+      setWallet((prev) => prev ? { ...prev, balance: result.newBalance } : prev);
+      await loadWalletTransactions();
+      setWalletNotice('');
+      return result;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    }
+  };
+
+  const releaseJobPaymentFromWallet = async (listingId, workerId) => {
+    try {
+      const result = await releaseJobPaymentService(listingId, workerId);
+      await loadWalletTransactions();
+      setWalletNotice('');
+      return result;
+    } catch (error) {
+      setWalletNotice(error.message);
+      throw error;
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1513,6 +1653,19 @@ export function AppProvider({ children }) {
         updateRentalBookingStage,
         applyForJob,
         viewerLocation,
+        wallet,
+        walletNotice,
+        walletTransactions,
+        isWalletLoading,
+        loadWallet,
+        loadWalletTransactions,
+        topUpWallet,
+        withdrawFromWallet,
+        payForJobFromWallet,
+        releaseJobPaymentFromWallet,
+        preferredCurrency,
+        changePreferredCurrency,
+        currencyList: CURRENCY_LIST,
       }}
     >
       {children}
