@@ -301,3 +301,40 @@ export async function submitRentalReview({
     threadId: data.thread_id,
   };
 }
+
+export async function cancelRentalBooking(requestId) {
+  const client = getSupabaseClient();
+
+  const { data: request, error: fetchError } = await client
+    .from('rental_requests')
+    .select('id, thread_id, status')
+    .eq('id', requestId)
+    .single();
+
+  if (fetchError) {
+    throw new Error(fetchError.message || 'Could not find this rental request.');
+  }
+
+  if (!request) {
+    throw new Error('Rental request not found.');
+  }
+
+  if (!['requested', 'accepted'].includes(request.status)) {
+    throw new Error('This rental request can no longer be cancelled.');
+  }
+
+  const { error: updateError } = await client
+    .from('rental_requests')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', requestId);
+
+  if (updateError) {
+    throw new Error(updateError.message || 'Could not cancel this rental request.');
+  }
+
+  return {
+    requestId: request.id,
+    threadId: request.thread_id,
+    status: 'cancelled',
+  };
+}

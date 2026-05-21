@@ -196,3 +196,46 @@ export async function reviewOwnerApplication(applicationId, nextStatus) {
     listing,
   };
 }
+
+export async function cancelJobApplication(applicationId) {
+  const client = getSupabaseClient();
+
+  const { data: application, error: fetchError } = await client
+    .from('applications')
+    .select('id, listing_id, status')
+    .eq('id', applicationId)
+    .single();
+
+  if (fetchError) {
+    throw new Error(fetchError.message || 'Could not find this application.');
+  }
+
+  if (!application) {
+    throw new Error('Application not found.');
+  }
+
+  if (application.status !== 'pending') {
+    throw new Error('Only pending applications can be cancelled.');
+  }
+
+  const { error: updateError } = await client
+    .from('applications')
+    .update({ status: 'withdrawn' })
+    .eq('id', applicationId);
+
+  if (updateError) {
+    throw new Error(updateError.message || 'Could not cancel this application.');
+  }
+
+  const listing = await fetchListingById(application.listing_id);
+
+  return {
+    application: {
+      id: application.id,
+      listingId: application.listing_id,
+      status: 'withdrawn',
+      createdAt: Date.now(),
+    },
+    listing,
+  };
+}
