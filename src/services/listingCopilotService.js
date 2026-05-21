@@ -1,3 +1,4 @@
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
 import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
 import { jobPostCategories, rentalPostCategories } from './postService';
 
@@ -18,6 +19,50 @@ function normalizeWarnings(value) {
     .map((item) => normalizeString(item))
     .filter(Boolean)
     .slice(0, 4);
+}
+
+async function resolveFunctionErrorMessage(error) {
+  if (error instanceof FunctionsHttpError) {
+    const response = error.context;
+
+    if (response) {
+      try {
+        const payload = await response.json();
+
+        if (typeof payload?.error === 'string' && payload.error.trim()) {
+          return payload.error.trim();
+        }
+
+        if (typeof payload?.message === 'string' && payload.message.trim()) {
+          return payload.message.trim();
+        }
+      } catch (_jsonError) {
+        try {
+          const text = await response.text();
+
+          if (text.trim()) {
+            return text.trim();
+          }
+        } catch (_textError) {
+          // Fall through to the generic message below.
+        }
+      }
+
+      if (response.status === 404) {
+        return 'The listing-copilot Edge Function is not deployed in this Supabase project yet.';
+      }
+    }
+  }
+
+  if (error instanceof FunctionsRelayError) {
+    return 'Supabase could not relay the AI request to the Edge Function right now.';
+  }
+
+  if (error instanceof FunctionsFetchError) {
+    return 'The app could not reach the Edge Function. Check your connection and Supabase project URL.';
+  }
+
+  return error?.message || 'We could not reach AI Listing Copilot right now.';
 }
 
 export function buildListingCopilotPayload({
@@ -101,7 +146,7 @@ export async function requestListingCopilotSuggestions(input) {
   });
 
   if (error) {
-    throw new Error(error.message || 'We could not reach AI Listing Copilot right now.');
+    throw new Error(await resolveFunctionErrorMessage(error));
   }
 
   if (!data?.suggestion) {
