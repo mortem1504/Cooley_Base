@@ -4,6 +4,17 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseHostname = (() => {
+  try {
+    return new URL(supabaseUrl).hostname;
+  } catch (_error) {
+    return '';
+  }
+})();
+
+export const supabaseAuthStorageKey = supabaseHostname
+  ? `sb-${supabaseHostname.split('.')[0]}-auth-token`
+  : 'supabase-auth-token';
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -26,4 +37,14 @@ export function getSupabaseClient() {
   }
 
   return supabase;
+}
+
+export async function clearSupabaseAuthStorage() {
+  const keysToRemove = [
+    supabaseAuthStorageKey,
+    `${supabaseAuthStorageKey}-code-verifier`,
+    `${supabaseAuthStorageKey}-user`,
+  ];
+
+  await Promise.all(keysToRemove.map((key) => AsyncStorage.removeItem(key)));
 }

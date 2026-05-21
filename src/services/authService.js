@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import { getSupabaseClient } from './supabaseClient';
+import { clearSupabaseAuthStorage, getSupabaseClient } from './supabaseClient';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -110,6 +110,15 @@ function normalizeLoginLookupError(error) {
   return error;
 }
 
+function isHtmlJsonParseError(error) {
+  const message = error?.message || '';
+
+  return (
+    message.includes('JSON Parse error: Unexpected character: <') ||
+    message.includes('Unexpected token <')
+  );
+}
+
 async function resolveLoginEmail(identifier) {
   const normalizedIdentifier = normalizeIdentifier(identifier);
 
@@ -139,9 +148,27 @@ async function resolveLoginEmail(identifier) {
 
 export async function getCurrentSession() {
   const client = getClient();
-  const { data, error } = await client.auth.getSession();
+  let result;
+
+  try {
+    result = await client.auth.getSession();
+  } catch (error) {
+    if (isHtmlJsonParseError(error)) {
+      await clearSupabaseAuthStorage();
+      return null;
+    }
+
+    throw error;
+  }
+
+  const { data, error } = result;
 
   if (error) {
+    if (isHtmlJsonParseError(error)) {
+      await clearSupabaseAuthStorage();
+      return null;
+    }
+
     throw error;
   }
 

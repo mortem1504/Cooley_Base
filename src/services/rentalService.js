@@ -1,7 +1,7 @@
 import { buildInitials } from './profileService';
 import { getSupabaseClient } from './supabaseClient';
 
-const RENTAL_FLOW_REPAIR_FILE = '005_rental_request_flow.sql';
+const RENTAL_FLOW_REPAIR_FILES = '005_rental_request_flow.sql and 006_cancel_request_flow.sql';
 
 const RENTAL_REQUEST_SELECT = `
   id,
@@ -82,7 +82,7 @@ function normalizeRentalRpcError(error) {
     message.includes('is ambiguous')
   ) {
     return new Error(
-      `The rental request backend needs the latest Supabase repair. Run ${RENTAL_FLOW_REPAIR_FILE} in Supabase and try again.`
+      `The rental request backend needs the latest Supabase repairs. Run ${RENTAL_FLOW_REPAIR_FILES} in Supabase and try again.`
     );
   }
 
@@ -304,37 +304,28 @@ export async function submitRentalReview({
 
 export async function cancelRentalBooking(requestId) {
   const client = getSupabaseClient();
+export async function cancelRentalBooking(requestId) {
+  const client = getSupabaseClient();
 
-  const { data: request, error: fetchError } = await client
-    .from('rental_requests')
-    .select('id, thread_id, status')
-    .eq('id', requestId)
-    .single();
+  const { data, error } = await callRpcWithFallback(client, 'cancel_rental_request', [
+    {
+      target_request_id: requestId,
+    },
+    {
+      p_target_request_id: requestId,
+    },
+  ]);
 
-  if (fetchError) {
-    throw new Error(fetchError.message || 'Could not find this rental request.');
-  }
-
-  if (!request) {
-    throw new Error('Rental request not found.');
-  }
-
-  if (!['requested', 'accepted'].includes(request.status)) {
-    throw new Error('This rental request can no longer be cancelled.');
-  }
-
-  const { error: updateError } = await client
-    .from('rental_requests')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('id', requestId);
-
-  if (updateError) {
-    throw new Error(updateError.message || 'Could not cancel this rental request.');
+  if (error) {
+    throw normalizeRentalRpcError(error);
   }
 
   return {
-    requestId: request.id,
-    threadId: request.thread_id,
-    status: 'cancelled',
+    listingId: data.listing_id,
+    requestId: data.request_id,
+    requestStatus: data.request_status,
+    threadId: data.thread_id,
+  };
+}
   };
 }

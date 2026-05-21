@@ -214,11 +214,11 @@ export function AppProvider({ children }) {
   const [isMessagesLoadingByThread, setIsMessagesLoadingByThread] = useState({});
   const [threadsNotice, setThreadsNotice] = useState('');
   const [messageNoticeByThread, setMessageNoticeByThread] = useState({});
-  const [wallet, setWallet] = useState(null);
-  const [walletTransactions, setWalletTransactions] = useState([]);
-  const [isWalletLoading, setIsWalletLoading] = useState(false);
-  const [walletNotice, setWalletNotice] = useState('');
-  const [preferredCurrency, setPreferredCurrency] = useState(getAppCurrency());
+      setWallet(null);
+      setWalletTransactions([]);
+      setWalletNotice('');
+      setIsWalletLoading(false);
+      setPinnedListingIds([]);
   const [pinnedListingIds, setPinnedListingIds] = useState([]);
   const [filters, setFilters] = useState(buildDefaultFilters);
   const ownerApplicationsCacheRef = useRef({});
@@ -230,7 +230,11 @@ export function AppProvider({ children }) {
     () =>
       dedupeById(
         jobs.map((job) => {
-          const myApplication = jobApplications[job.id] || null;
+          const rawApplication = jobApplications[job.id] || null;
+          const myApplication =
+            rawApplication && ['pending', 'accepted'].includes(rawApplication.status)
+              ? rawApplication
+              : null;
           const liveDistance =
             viewerLocation &&
             isValidCoordinate(job.latitude) &&
@@ -284,6 +288,20 @@ export function AppProvider({ children }) {
           job.distance <= filters.maxDistance
       ),
     [filters, jobsWithViewerState]
+  );
+  const allListings = useMemo(
+    () =>
+      dedupeById([...jobsWithViewerState, ...rentalsWithViewerState]).sort(
+        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
+      ),
+    [jobsWithViewerState, rentalsWithViewerState]
+  );
+  const pinnedListings = useMemo(
+    () =>
+      pinnedListingIds
+        .map((listingId) => allListings.find((listing) => listing.id === listingId))
+        .filter(Boolean),
+    [allListings, pinnedListingIds]
   );
   const isAuthenticated = Boolean(session?.user);
   const threads = useMemo(
@@ -1039,10 +1057,15 @@ export function AppProvider({ children }) {
       setIsMessagesLoadingByThread({});
       setIsThreadsLoading(false);
       setThreadsNotice('');
+     setIsThreadsLoading(false);
+      setThreadsNotice('');
       setWallet(null);
       setWalletTransactions([]);
       setWalletNotice('');
       setIsWalletLoading(false);
+      setPinnedListingIds([]);
+      setAuthNotice('');
+      return { ok: true };
       setPinnedListingIds([]);
       setAuthNotice('');
       return { ok: true };
@@ -1412,6 +1435,18 @@ export function AppProvider({ children }) {
         startDate,
         endDate,
       });
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
+  const cancelRentalBooking = async (requestId) => {
+    try {
+      const result = await cancelRentalBookingRecord(requestId);
       const thread = await refreshMarketplaceAndThreadState(result.threadId);
       setListingsNotice('');
       return { ...result, thread };

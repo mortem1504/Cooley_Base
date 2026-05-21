@@ -2,7 +2,7 @@ import { fetchListingById } from './listingsService';
 import { buildInitials } from './profileService';
 import { getSupabaseClient } from './supabaseClient';
 
-const APPLICATION_REPAIR_FILE = '002_existing_project_repairs.sql';
+const APPLICATION_REPAIR_FILES = '002_existing_project_repairs.sql and 006_cancel_request_flow.sql';
 
 function isRpcArgumentMismatch(error) {
   const message = error?.message || '';
@@ -42,7 +42,7 @@ function normalizeApplicationRpcError(error) {
     message.includes('is ambiguous')
   ) {
     return new Error(
-      `The job application backend needs the latest Supabase repair. Run ${APPLICATION_REPAIR_FILE} in Supabase and try again.`
+      `The job application backend needs the latest Supabase repairs. Run ${APPLICATION_REPAIR_FILES} in Supabase and try again.`
     );
   }
 
@@ -199,43 +199,31 @@ export async function reviewOwnerApplication(applicationId, nextStatus) {
 
 export async function cancelJobApplication(applicationId) {
   const client = getSupabaseClient();
+export async function cancelJobApplication(applicationId) {
+  const client = getSupabaseClient();
 
-  const { data: application, error: fetchError } = await client
-    .from('applications')
-    .select('id, listing_id, status')
-    .eq('id', applicationId)
-    .single();
-
-  if (fetchError) {
-    throw new Error(fetchError.message || 'Could not find this application.');
-  }
-
-  if (!application) {
-    throw new Error('Application not found.');
-  }
-
-  if (application.status !== 'pending') {
-    throw new Error('Only pending applications can be cancelled.');
-  }
-
-  const { error: updateError } = await client
-    .from('applications')
-    .update({ status: 'withdrawn' })
-    .eq('id', applicationId);
-
-  if (updateError) {
-    throw new Error(updateError.message || 'Could not cancel this application.');
-  }
-
-  const listing = await fetchListingById(application.listing_id);
-
-  return {
-    application: {
-      id: application.id,
-      listingId: application.listing_id,
-      status: 'withdrawn',
-      createdAt: Date.now(),
+  const { data, error } = await callRpcWithFallback(client, 'cancel_job_application', [
+    {
+      target_application_id: applicationId,
     },
-    listing,
+    {
+      p_target_application_id: applicationId,
+    },
+  ]);
+
+  if (error) {
+    throw normalizeApplicationRpcError(error);
+  }
+
+  const application = {
+    id: data.application_id,
+    listingId: data.listing_id,
+    status: data.application_status,
+    createdAt: new Date(data.cancelled_at).getTime(),
   };
+
+  const listing = await fetchListingById(data.listing_id);
+
+  return { application, listing };
+}
 }

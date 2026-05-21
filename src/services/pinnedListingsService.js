@@ -1,46 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const PINNED_LISTINGS_KEY_PREFIX = '@cooley_pinned_listings_';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-function getStorageKey(userId) {
-  return `${PINNED_LISTINGS_KEY_PREFIX}${userId}`;
+function buildPinnedListingsStorageKey(userId) {
+  return `cooley:pinned-listings:${userId || 'guest'}`;
 }
 
-/**
- * Load pinned listing IDs for a user from local storage.
- * @param {string} userId
- * @returns {Promise<string[]>}
- */
 export async function loadPinnedListingIds(userId) {
-  if (!userId) {
+  const storageKey = buildPinnedListingsStorageKey(userId);
+  const storedValue = await AsyncStorage.getItem(storageKey);
+
+  if (!storedValue) {
     return [];
   }
 
   try {
-    const stored = await AsyncStorage.getItem(getStorageKey(userId));
-
-    if (!stored) {
-      return [];
-    }
-
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed : [];
+    const parsedValue = JSON.parse(storedValue);
+    return Array.isArray(parsedValue) ? parsedValue.filter(Boolean) : [];
   } catch (_error) {
     return [];
   }
 }
 
-/**
- * Save pinned listing IDs for a user to local storage.
- * @param {string} userId
- * @param {string[]} listingIds
- * @returns {Promise<void>}
- */
 export async function savePinnedListingIds(userId, listingIds) {
-  if (!userId) {
-    return;
-  }
-
-  const sanitized = Array.isArray(listingIds) ? listingIds : [];
-  await AsyncStorage.setItem(getStorageKey(userId), JSON.stringify(sanitized));
+  const storageKey = buildPinnedListingsStorageKey(userId);
+  await AsyncStorage.setItem(storageKey, JSON.stringify(listingIds));
+}
 }

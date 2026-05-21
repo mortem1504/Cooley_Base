@@ -172,7 +172,12 @@ export function mapListingRowToAppListing(row) {
     coverImageUrl: images[0]?.url || null,
     durationText: row.duration_text,
     duration: row.duration_text,
-    listingMode: row.type === 'rental' && row.instant_accept ? 'sell' : 'rent',
+    listingMode:
+      row.type === 'rental'
+        ? row.instant_accept
+          ? 'sell'
+          : 'rent'
+        : 'job',
     imageCount: images.length,
     imageUrls: images.map((image) => image.url),
     images,
