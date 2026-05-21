@@ -304,6 +304,9 @@ export async function submitRentalReview({
 
 export async function cancelRentalBooking(requestId) {
   const client = getSupabaseClient();
+export async function cancelRentalBooking(requestId) {
+  const client = getSupabaseClient();
+
   const { data, error } = await callRpcWithFallback(client, 'cancel_rental_request', [
     {
       target_request_id: requestId,
@@ -322,5 +325,7 @@ export async function cancelRentalBooking(requestId) {
     requestId: data.request_id,
     requestStatus: data.request_status,
     threadId: data.thread_id,
+  };
+}
   };
 }

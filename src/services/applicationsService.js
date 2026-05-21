@@ -199,6 +199,9 @@ export async function reviewOwnerApplication(applicationId, nextStatus) {
 
 export async function cancelJobApplication(applicationId) {
   const client = getSupabaseClient();
+export async function cancelJobApplication(applicationId) {
+  const client = getSupabaseClient();
+
   const { data, error } = await callRpcWithFallback(client, 'cancel_job_application', [
     {
       target_application_id: applicationId,
@@ -222,4 +225,5 @@ export async function cancelJobApplication(applicationId) {
   const listing = await fetchListingById(data.listing_id);
 
   return { application, listing };
+}
 }

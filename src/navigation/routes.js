@@ -11,6 +11,7 @@ export const TAB_ROUTES = {
   DISCOVER: 'Discover',
   MESSAGES: 'Messages',
   POST_JOB: 'PostJob',
+  WALLET: 'Wallet',
   PROFILE: 'Profile',
 };
 
@@ -18,4 +19,11 @@ export const DISCOVER_ROUTES = {
   HOME: 'DiscoverHome',
   MAP: 'MapBrowse',
   LIST: 'ListBrowse',
+};
+
+export const WALLET_ROUTES = {
+  HOME: 'WalletHome',
+  TOP_UP: 'TopUp',
+  WITHDRAW: 'Withdraw',
+  TRANSACTION_HISTORY: 'TransactionHistory',
 };

@@ -1,4 +1,5 @@
 import { titleCase } from './formatters';
+import { formatPriceWithConversion } from './currency';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -53,14 +54,14 @@ export function calculateRentalTotal(ratePerDay, startDate, endDate) {
   return Number((numericRate * rentalDays).toFixed(2));
 }
 
-export function formatRentalPrice(amount) {
+export function formatRentalPrice(amount, priceCurrency = 'USD', options = {}) {
   const numericAmount = Number(amount);
 
   if (!Number.isFinite(numericAmount)) {
-    return '$0.00';
+    return formatPriceWithConversion(0, priceCurrency, options);
   }
 
-  return `$${numericAmount.toFixed(2)}`;
+  return formatPriceWithConversion(numericAmount, priceCurrency, options);
 }
 
 export function formatRentalDate(dateInput) {

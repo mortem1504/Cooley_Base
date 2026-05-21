@@ -7,6 +7,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import { colors } from '../utils/theme';
 import DiscoverNavigator from './DiscoverNavigator';
 import TabIcon from './TabIcon';
+import WalletNavigator from './WalletNavigator';
 import { TAB_ROUTES } from './routes';
 
 const Tab = createBottomTabNavigator();
@@ -40,6 +41,13 @@ export default function MainTabNavigator() {
         name={TAB_ROUTES.POST_JOB}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Post" />,
+        }}
+      />
+      <Tab.Screen
+        component={WalletNavigator}
+        name={TAB_ROUTES.WALLET}
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon focused={focused} label="Wallet" />,
         }}
       />
       <Tab.Screen
