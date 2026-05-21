@@ -1,7 +1,7 @@
 import { buildInitials } from './profileService';
 import { getSupabaseClient } from './supabaseClient';
 
-const RENTAL_FLOW_REPAIR_FILE = '005_rental_request_flow.sql';
+const RENTAL_FLOW_REPAIR_FILES = '005_rental_request_flow.sql and 006_cancel_request_flow.sql';
 
 const RENTAL_REQUEST_SELECT = `
   id,
@@ -82,7 +82,7 @@ function normalizeRentalRpcError(error) {
     message.includes('is ambiguous')
   ) {
     return new Error(
-      `The rental request backend needs the latest Supabase repair. Run ${RENTAL_FLOW_REPAIR_FILE} in Supabase and try again.`
+      `The rental request backend needs the latest Supabase repairs. Run ${RENTAL_FLOW_REPAIR_FILES} in Supabase and try again.`
     );
   }
 
@@ -298,6 +298,29 @@ export async function submitRentalReview({
     reviewId: data.review_id,
     reviewerId: data.reviewer_id,
     revieweeId: data.reviewee_id,
+    threadId: data.thread_id,
+  };
+}
+
+export async function cancelRentalBooking(requestId) {
+  const client = getSupabaseClient();
+  const { data, error } = await callRpcWithFallback(client, 'cancel_rental_request', [
+    {
+      target_request_id: requestId,
+    },
+    {
+      p_target_request_id: requestId,
+    },
+  ]);
+
+  if (error) {
+    throw normalizeRentalRpcError(error);
+  }
+
+  return {
+    listingId: data.listing_id,
+    requestId: data.request_id,
+    requestStatus: data.request_status,
     threadId: data.thread_id,
   };
 }

@@ -111,6 +111,7 @@ export default function DiscoverScreen({ navigation }) {
     currentUser,
     filters,
     isListingsLoading,
+    pinnedListings,
     isLocationLoading,
     jobs,
     listingsNotice,
@@ -170,6 +171,21 @@ export default function DiscoverScreen({ navigation }) {
   );
   const visibleJobCount = visibleListings.filter((listing) => getListingGroup(listing) === 'job').length;
   const visibleItemCount = visibleListings.filter((listing) => getListingGroup(listing) === 'item').length;
+  const visiblePinnedListings = useMemo(
+    () =>
+      pinnedListings.filter((listing) => {
+        if (selectedListingFilter === 'job') {
+          return getListingGroup(listing) === 'job';
+        }
+
+        if (selectedListingFilter === 'rental') {
+          return getListingGroup(listing) === 'item';
+        }
+
+        return true;
+      }),
+    [pinnedListings, selectedListingFilter]
+  );
   const hasActiveFilters =
     Boolean(filters.search) ||
     filters.maxPrice < DEFAULT_MAX_PRICE ||
@@ -441,7 +457,7 @@ export default function DiscoverScreen({ navigation }) {
                 <View style={styles.sectionCopy}>
                   <Text style={styles.sectionTitle}>Pinned listings</Text>
                   <Text style={styles.sectionSubtitle}>
-                    The same filtered results shown below the map.
+                    Listings you saved for quick access later.
                   </Text>
                 </View>
                 {hasActiveFilters ? (
@@ -451,8 +467,8 @@ export default function DiscoverScreen({ navigation }) {
                 ) : null}
               </View>
 
-              {visibleListings.length ? (
-                visibleListings.map((listing) => (
+              {visiblePinnedListings.length ? (
+                visiblePinnedListings.map((listing) => (
                   <MapJobRow
                     job={listing}
                     key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
@@ -461,7 +477,7 @@ export default function DiscoverScreen({ navigation }) {
                 ))
               ) : (
                 <Text style={styles.messageText}>
-                  No listings are available for this map view yet.
+                  Pin a listing from its detail screen and it will show up here.
                 </Text>
               )}
             </AppCard>

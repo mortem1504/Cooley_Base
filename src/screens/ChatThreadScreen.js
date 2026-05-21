@@ -118,6 +118,7 @@ function BookingHeaderCard({
   onAccept,
   onAdvanceToCompleted,
   onAdvanceToOngoing,
+  onCancelRequest,
   onReject,
   updating,
 }) {
@@ -140,6 +141,8 @@ function BookingHeaderCard({
   }
 
   const isOwnerView = booking.ownerId === currentUserId;
+  const canRenterCancel =
+    !isOwnerView && ['requested', 'accepted'].includes(booking.status);
 
   return (
     <AppCard style={styles.contextCard}>
@@ -192,6 +195,15 @@ function BookingHeaderCard({
           onPress={onAdvanceToCompleted}
         />
       ) : null}
+
+      {canRenterCancel ? (
+        <AppButton
+          disabled={updating}
+          label={updating ? 'Updating...' : 'Cancel request'}
+          onPress={onCancelRequest}
+          variant="ghost"
+        />
+      ) : null}
     </AppCard>
   );
 }
@@ -207,6 +219,7 @@ export default function ChatThreadScreen({ navigation, route }) {
     loadMessagesForThread,
     loadRentalRequestForThread,
     markThreadRead,
+    cancelRentalBooking,
     reviewRentalBooking,
     sendMessage,
     submitRentalReviewForRequest,
@@ -368,6 +381,8 @@ export default function ChatThreadScreen({ navigation, route }) {
     try {
       if (action === 'accepted' || action === 'rejected') {
         await reviewRentalBooking(booking.id, action);
+      } else if (action === 'cancelled') {
+        await cancelRentalBooking(booking.id);
       } else {
         await updateRentalBookingStage(booking.id, action);
       }
@@ -447,6 +462,7 @@ export default function ChatThreadScreen({ navigation, route }) {
             onAccept={() => handleUpdateBooking('accepted')}
             onAdvanceToCompleted={() => handleUpdateBooking('completed')}
             onAdvanceToOngoing={() => handleUpdateBooking('ongoing')}
+            onCancelRequest={() => handleUpdateBooking('cancelled')}
             onReject={() => handleUpdateBooking('rejected')}
             updating={isBookingUpdating}
           />

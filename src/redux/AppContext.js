@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AppState } from 'react-native';
 import {
   applyToJobListing,
+  cancelJobApplication as cancelJobApplicationRecord,
   fetchMyJobApplications,
   fetchOwnerApplicationsForListing,
   reviewOwnerApplication,
@@ -37,6 +38,7 @@ import {
 } from '../services/listingsService';
 import {
   advanceRentalBookingStage,
+  cancelRentalBooking as cancelRentalBookingRecord,
   fetchRentalRequestByListing,
   fetchRentalRequestByThread,
   requestRentalBooking as requestRentalBookingRecord,
@@ -53,6 +55,10 @@ import {
   emptyUserProfile,
   updateProfileById,
 } from '../services/profileService';
+import {
+  loadPinnedListingIds,
+  savePinnedListingIds,
+} from '../services/pinnedListingsService';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 const AppContext = createContext(null);
@@ -181,6 +187,7 @@ export function AppProvider({ children }) {
   const [isMessagesLoadingByThread, setIsMessagesLoadingByThread] = useState({});
   const [threadsNotice, setThreadsNotice] = useState('');
   const [messageNoticeByThread, setMessageNoticeByThread] = useState({});
+  const [pinnedListingIds, setPinnedListingIds] = useState([]);
   const [filters, setFilters] = useState(buildDefaultFilters);
   const ownerApplicationsCacheRef = useRef({});
   const isThreadSyncInFlightRef = useRef(false);
@@ -191,7 +198,11 @@ export function AppProvider({ children }) {
     () =>
       dedupeById(
         jobs.map((job) => {
-          const myApplication = jobApplications[job.id] || null;
+          const rawApplication = jobApplications[job.id] || null;
+          const myApplication =
+            rawApplication && ['pending', 'accepted'].includes(rawApplication.status)
+              ? rawApplication
+              : null;
           const liveDistance =
             viewerLocation &&
             isValidCoordinate(job.latitude) &&
@@ -245,6 +256,20 @@ export function AppProvider({ children }) {
           job.distance <= filters.maxDistance
       ),
     [filters, jobsWithViewerState]
+  );
+  const allListings = useMemo(
+    () =>
+      dedupeById([...jobsWithViewerState, ...rentalsWithViewerState]).sort(
+        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
+      ),
+    [jobsWithViewerState, rentalsWithViewerState]
+  );
+  const pinnedListings = useMemo(
+    () =>
+      pinnedListingIds
+        .map((listingId) => allListings.find((listing) => listing.id === listingId))
+        .filter(Boolean),
+    [allListings, pinnedListingIds]
   );
   const isAuthenticated = Boolean(session?.user);
   const threads = useMemo(
@@ -300,6 +325,41 @@ export function AppProvider({ children }) {
   useEffect(() => {
     ownerApplicationsCacheRef.current = ownerApplicationsByListing;
   }, [ownerApplicationsByListing]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function hydratePinnedListings() {
+      const activeUserId = session?.user?.id || currentUser.id;
+
+      if (!activeUserId) {
+        if (isMounted) {
+          setPinnedListingIds([]);
+        }
+        return;
+      }
+
+      try {
+        const nextPinnedListingIds = await loadPinnedListingIds(activeUserId);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setPinnedListingIds(nextPinnedListingIds);
+      } catch (_error) {
+        if (isMounted) {
+          setPinnedListingIds([]);
+        }
+      }
+    }
+
+    hydratePinnedListings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser.id, session?.user?.id]);
 
   const refreshViewerLocation = async () => {
     setIsLocationLoading(true);
@@ -940,6 +1000,7 @@ export function AppProvider({ children }) {
       setIsMessagesLoadingByThread({});
       setIsThreadsLoading(false);
       setThreadsNotice('');
+      setPinnedListingIds([]);
       setAuthNotice('');
       return { ok: true };
     } catch (error) {
@@ -1083,6 +1144,17 @@ export function AppProvider({ children }) {
         delete nextApplications[listingId];
         return nextApplications;
       });
+      setPinnedListingIds((prev) => {
+        if (!prev.includes(listingId)) {
+          return prev;
+        }
+
+        const nextPinnedListingIds = prev.filter((id) => id !== listingId);
+        savePinnedListingIds(session?.user?.id || currentUser.id, nextPinnedListingIds).catch(
+          () => {}
+        );
+        return nextPinnedListingIds;
+      });
       setListingsNotice('');
       setApplicationsNotice('');
       return { ok: true };
@@ -1093,6 +1165,30 @@ export function AppProvider({ children }) {
   };
 
   const getThreadById = (threadId) => threads.find((thread) => thread.id === threadId);
+
+  const isListingPinned = (listingId) => pinnedListingIds.includes(listingId);
+
+  const togglePinnedListing = async (listingId) => {
+    const activeUserId = session?.user?.id || currentUser.id;
+
+    if (!activeUserId) {
+      throw new Error('Log in first to pin listings.');
+    }
+
+    const nextPinnedListingIds = isListingPinned(listingId)
+      ? pinnedListingIds.filter((id) => id !== listingId)
+      : [listingId, ...pinnedListingIds.filter((id) => id !== listingId)];
+
+    setPinnedListingIds(nextPinnedListingIds);
+
+    try {
+      await savePinnedListingIds(activeUserId, nextPinnedListingIds);
+      return nextPinnedListingIds.includes(listingId);
+    } catch (error) {
+      setPinnedListingIds(pinnedListingIds);
+      throw new Error(error.message || 'We could not update your pinned listings right now.');
+    }
+  };
 
   const getMessagesForThread = (threadId) => messagesByThread[threadId] || [];
 
@@ -1282,6 +1378,18 @@ export function AppProvider({ children }) {
     }
   };
 
+  const cancelRentalBooking = async (requestId) => {
+    try {
+      const result = await cancelRentalBookingRecord(requestId);
+      const thread = await refreshMarketplaceAndThreadState(result.threadId);
+      setListingsNotice('');
+      return { ...result, thread };
+    } catch (error) {
+      setListingsNotice(error.message);
+      throw error;
+    }
+  };
+
   const reviewRentalBooking = async (requestId, nextStatus) => {
     try {
       const result = await reviewRentalBookingRecord(requestId, nextStatus);
@@ -1401,13 +1509,46 @@ export function AppProvider({ children }) {
 
   const instantAcceptJob = (jobId) => submitJobApplication(jobId, true);
 
+  const cancelJobApplication = async (listingId) => {
+    const currentApplication = jobApplications[listingId];
+
+    if (!currentApplication?.id) {
+      throw new Error('There is no active application to cancel for this job.');
+    }
+
+    try {
+      const result = await cancelJobApplicationRecord(currentApplication.id);
+
+      setJobApplications((prev) => ({
+        ...prev,
+        [listingId]: result.application,
+      }));
+      setJobs((prev) => upsertById(prev, result.listing));
+      setListingsNotice('');
+      setApplicationsNotice('');
+      return result;
+    } catch (error) {
+      setListingsNotice(error.message);
+      setApplicationsNotice(error.message);
+      throw error;
+    }
+  };
+
   const cancelJob = (jobId) => updateJobStatus(jobId, 'cancelled');
 
   const getJobById = (jobId) =>
     jobsWithViewerState.find((job) => job.id === jobId) ||
     rentalsWithViewerState.find((rental) => rental.id === jobId);
 
-  const getMyApplicationForJob = (jobId) => jobApplications[jobId] || null;
+  const getMyApplicationForJob = (jobId) => {
+    const application = jobApplications[jobId] || null;
+
+    if (!application) {
+      return null;
+    }
+
+    return ['pending', 'accepted'].includes(application.status) ? application : null;
+  };
 
   const reviewApplicationForOwnedJob = async (applicationId, nextStatus) => {
     try {
@@ -1458,6 +1599,8 @@ export function AppProvider({ children }) {
         authNotice,
         applicationsNotice,
         cancelJob,
+        cancelJobApplication,
+        cancelRentalBooking,
         currentUser,
         continueWithGoogle,
         filteredJobs,
@@ -1476,6 +1619,7 @@ export function AppProvider({ children }) {
         isListingsLoading,
         isLocationLoading,
         isOwnerApplicationsLoading,
+        isListingPinned,
         isThreadMessagesLoading,
         isThreadsLoading,
         jobs: jobsWithViewerState,
@@ -1490,6 +1634,7 @@ export function AppProvider({ children }) {
         myListings,
         openJobChat,
         openApplicationChat,
+        pinnedListings,
         postJob,
         postRental,
         requestRentalBooking,
@@ -1506,6 +1651,7 @@ export function AppProvider({ children }) {
         submitRentalReviewForRequest,
         threads,
         threadsNotice,
+        togglePinnedListing,
         unreadThreadCount,
         updateCurrentUserProfile,
         updateOwnedListing,
