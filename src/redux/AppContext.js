@@ -1452,18 +1452,6 @@ export function AppProvider({ children }) {
     }
   };
 
-  const cancelRentalBooking = async (requestId) => {
-    try {
-      const result = await cancelRentalBookingRecord(requestId);
-      const thread = await refreshMarketplaceAndThreadState(result.threadId);
-      setListingsNotice('');
-      return { ...result, thread };
-    } catch (error) {
-      setListingsNotice(error.message);
-      throw error;
-    }
-  };
-
   const updateRentalBookingStage = async (requestId, nextStatus) => {
     try {
       const result = await advanceRentalBookingStage(requestId, nextStatus);
