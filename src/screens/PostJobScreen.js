@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   LayoutAnimation,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -186,6 +187,8 @@ export default function PostJobScreen({ navigation, route }) {
   const [copilotSuggestion, setCopilotSuggestion] = useState(null);
   const [copilotNotice, setCopilotNotice] = useState('');
   const [isGeneratingCopilot, setIsGeneratingCopilot] = useState(false);
+  const [isAssistantExpanded, setIsAssistantExpanded] = useState(false);
+  const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
   const [forms, setForms] = useState({
     job: buildInitialPostForm('job'),
     rental: buildInitialPostForm('rental'),
@@ -203,6 +206,8 @@ export default function PostJobScreen({ navigation, route }) {
     setCopilotSuggestion(null);
     setCopilotNotice('');
     setIsGeneratingCopilot(false);
+    setIsAssistantExpanded(false);
+    setIsSuggestionsVisible(false);
     setSelectedType(null);
     clearEditIntent();
   };
@@ -237,6 +242,8 @@ export default function PostJobScreen({ navigation, route }) {
     }));
     setCopilotSuggestion(null);
     setCopilotNotice('');
+    setIsAssistantExpanded(false);
+    setIsSuggestionsVisible(false);
   }, [editingListing]);
 
   useEffect(() => {
@@ -270,6 +277,8 @@ export default function PostJobScreen({ navigation, route }) {
     setCopilotPrompt('');
     setCopilotSuggestion(null);
     setCopilotNotice('');
+    setIsAssistantExpanded(false);
+    setIsSuggestionsVisible(false);
   };
 
   const updateForm = (key, value) => {
@@ -483,9 +492,11 @@ export default function PostJobScreen({ navigation, route }) {
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setCopilotSuggestion(nextSuggestion);
+      setIsSuggestionsVisible(true);
+      setIsAssistantExpanded(false);
     } catch (error) {
       setCopilotNotice(
-        error.message || 'AI Listing Copilot could not prepare a suggestion right now.'
+        error.message || 'AI Listing Assistant could not prepare a suggestion right now.'
       );
     } finally {
       setIsGeneratingCopilot(false);
@@ -500,6 +511,7 @@ export default function PostJobScreen({ navigation, route }) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setFormValues(() => {
       if (field === 'all') {
+        setIsSuggestionsVisible(false);
         return {
           budget: copilotSuggestion.budget || activeForm.budget,
           category: copilotSuggestion.category || activeForm.category,
@@ -526,6 +538,12 @@ export default function PostJobScreen({ navigation, route }) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCopilotSuggestion(null);
     setCopilotNotice('');
+    setIsSuggestionsVisible(false);
+  };
+
+  const toggleAssistant = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setIsAssistantExpanded((prev) => !prev);
   };
 
   const submit = async () => {
@@ -699,134 +717,136 @@ export default function PostJobScreen({ navigation, route }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={goBack} style={styles.backButton}>
-          <Text style={styles.backButtonText}>{'<'}</Text>
-        </Pressable>
-        <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>{isEditing ? `Edit ${activeOption.title}` : activeOption.title}</Text>
-          <Text style={styles.headerSubtitle}>
-            {isEditing ? 'Update your live listing details' : 'Fill in the details below'}
-          </Text>
-        </View>
-      </View>
-
-      {!isEditing ? (
-        <View style={styles.modeTabs}>
-          {postTypeOptions.map((option) => (
-            <PostTypeTab
-              active={selectedType === option.key}
-              key={option.key}
-              onPress={() => {
-                setSelectedType(option.key);
-                setCopilotSuggestion(null);
-                setCopilotNotice('');
-              }}
-              title={option.title}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      <AppCard style={styles.copilotCard}>
-        <View style={styles.copilotHeader}>
-          <View style={styles.copilotHeaderCopy}>
-            <Text style={styles.copilotTitle}>AI Listing Copilot</Text>
-            <Text style={styles.copilotSubtitle}>
-              Turn a rough idea into a stronger title, description, category, and pricing draft.
+    <>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
+        <View style={styles.headerRow}>
+          <Pressable onPress={goBack} style={styles.backButton}>
+            <Text style={styles.backButtonText}>{'<'}</Text>
+          </Pressable>
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerTitle}>{isEditing ? `Edit ${activeOption.title}` : activeOption.title}</Text>
+            <Text style={styles.headerSubtitle}>
+              {isEditing ? 'Update your live listing details' : 'Fill in the details below'}
             </Text>
           </View>
-          {copilotSuggestion ? (
-            <Pressable onPress={clearCopilotSuggestion}>
-              <Text style={styles.copilotClearLink}>Clear</Text>
-            </Pressable>
-          ) : null}
         </View>
 
-        <AppTextInput
-          multiline
-          onChangeText={setCopilotPrompt}
-          placeholder={
-            selectedType === 'job'
-              ? 'Optional prompt: Need help moving 8 boxes from dorm to nearby apartment tonight'
-              : currentItemListingMode === 'sell'
-                ? 'Optional prompt: Selling a used camera with lens and charger'
-                : 'Optional prompt: Renting out a camera for weekend shoots near campus'
-          }
-          style={styles.copilotPromptInput}
-          value={copilotPrompt}
-        />
-
-        <View style={styles.copilotActionRow}>
-          <AppButton
-            disabled={isGeneratingCopilot}
-            label={isGeneratingCopilot ? 'Generating...' : 'Improve with AI'}
-            onPress={handleGenerateCopilot}
-            style={styles.copilotPrimaryButton}
-          />
-          {copilotSuggestion ? (
-            <AppButton
-              label="Apply all"
-              onPress={() => applyCopilotField('all')}
-              style={styles.copilotSecondaryButton}
-              variant="secondary"
-            />
-          ) : null}
-        </View>
-
-        {copilotNotice ? <Text style={styles.copilotNotice}>{copilotNotice}</Text> : null}
-
-        {copilotSuggestion ? (
-          <View style={styles.copilotSuggestionSection}>
-            <CopilotSuggestionRow
-              label="Title"
-              onApply={() => applyCopilotField('title')}
-              value={copilotSuggestion.title}
-            />
-            <CopilotSuggestionRow
-              label="Description"
-              onApply={() => applyCopilotField('description')}
-              value={copilotSuggestion.description}
-            />
-            <CopilotSuggestionRow
-              label="Category"
-              onApply={() => applyCopilotField('category')}
-              value={copilotSuggestion.category}
-            />
-            <CopilotSuggestionRow
-              label={selectedType === 'job' ? 'Budget' : currentItemListingMode === 'sell' ? 'Price' : 'Rate'}
-              onApply={() => applyCopilotField('budget')}
-              value={copilotSuggestion.budget}
-            />
-            {isDurationRequired ? (
-              <CopilotSuggestionRow
-                label="Duration"
-                onApply={() => applyCopilotField('duration')}
-                value={copilotSuggestion.duration}
+        {!isEditing ? (
+          <View style={styles.modeTabs}>
+            {postTypeOptions.map((option) => (
+              <PostTypeTab
+                active={selectedType === option.key}
+                key={option.key}
+                onPress={() => {
+                  setSelectedType(option.key);
+                  setCopilotSuggestion(null);
+                  setCopilotNotice('');
+                  setIsAssistantExpanded(false);
+                  setIsSuggestionsVisible(false);
+                }}
+                title={option.title}
               />
-            ) : null}
-            <CopilotSuggestionRow
-              label="Urgency"
-              onApply={() => applyCopilotField('urgent')}
-              value={copilotSuggestion.urgent ? 'Mark as urgent / available now' : 'Keep normal urgency'}
-            />
-
-            {copilotSuggestion.qualityWarnings.length ? (
-              <View style={styles.copilotWarningsWrap}>
-                <Text style={styles.copilotWarningsTitle}>What to tighten before posting</Text>
-                {copilotSuggestion.qualityWarnings.map((warning) => (
-                  <Text key={warning} style={styles.copilotWarningItem}>
-                    - {warning}
-                  </Text>
-                ))}
-              </View>
-            ) : null}
+            ))}
           </View>
         ) : null}
-      </AppCard>
 
-      <AppCard style={styles.photoCard}>
+        <AppCard style={styles.formSection}>
+          <View style={styles.assistantHeaderRow}>
+            <View style={styles.assistantHeaderCopy}>
+              <Text style={styles.assistantTitle}>AI Listing Assistant</Text>
+              <Text style={styles.assistantSubtitle}>
+                Draft your listing faster, then review suggestions before applying them.
+              </Text>
+            </View>
+            <View style={styles.assistantHeaderActions}>
+              {copilotSuggestion ? (
+                <Pressable onPress={() => setIsSuggestionsVisible(true)} style={styles.assistantHeaderChip}>
+                  <Text style={styles.assistantHeaderChipText}>View</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={toggleAssistant} style={styles.assistantHeaderChip}>
+                <Text style={styles.assistantHeaderChipText}>
+                  {isAssistantExpanded ? 'Hide' : 'Open'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {isAssistantExpanded ? (
+            <View style={styles.assistantExpandedBody}>
+              <AppTextInput
+                multiline
+                onChangeText={setCopilotPrompt}
+                placeholder={
+                  selectedType === 'job'
+                    ? 'Try: Room cleaning tonight near campus'
+                    : currentItemListingMode === 'sell'
+                      ? 'Try: Selling a used camera with charger'
+                      : 'Try: Camera rental for weekend shoots'
+                }
+                style={styles.assistantPromptInput}
+                value={copilotPrompt}
+              />
+
+              <View style={styles.assistantActionRow}>
+                <AppButton
+                  disabled={isGeneratingCopilot}
+                  label={isGeneratingCopilot ? 'Generating...' : 'Improve with AI'}
+                  onPress={handleGenerateCopilot}
+                  style={styles.assistantPrimaryButton}
+                />
+                {copilotSuggestion ? (
+                  <AppButton
+                    label="View suggestions"
+                    onPress={() => setIsSuggestionsVisible(true)}
+                    style={styles.assistantSecondaryButton}
+                    variant="secondary"
+                  />
+                ) : null}
+              </View>
+
+              {copilotNotice ? <Text style={styles.assistantNotice}>{copilotNotice}</Text> : null}
+            </View>
+          ) : (
+            <Pressable onPress={toggleAssistant} style={styles.assistantCollapsedBar}>
+              <Text style={styles.assistantCollapsedText}>
+                {copilotSuggestion
+                  ? 'Suggestions are ready. Open the assistant to review or view them directly.'
+                  : 'Use one short prompt to draft your title, description, category, and pricing.'}
+              </Text>
+              <Text style={styles.assistantCollapsedAction}>
+                {copilotSuggestion ? 'Suggestions ready' : 'Try it'}
+              </Text>
+            </Pressable>
+          )}
+
+          <View style={styles.assistantDivider} />
+
+          <SectionLabel>Title</SectionLabel>
+          <AppTextInput
+            onChangeText={(value) => updateForm('title', value)}
+            placeholder={
+              selectedType === 'job' ? 'e.g. Help move furniture' : 'e.g. Canon camera for rent'
+            }
+            style={styles.softInput}
+            value={activeForm.title}
+          />
+
+          <SectionLabel>Description</SectionLabel>
+          <AppTextInput
+            multiline
+            onChangeText={(value) => updateForm('description', value)}
+            placeholder={
+              selectedType === 'job'
+                ? 'Describe what you need...'
+                : 'Describe the item, condition, and what is included...'
+            }
+            style={[styles.softInput, styles.descriptionInput]}
+            value={activeForm.description}
+          />
+        </AppCard>
+
+        <AppCard style={styles.photoCard}>
         <View style={styles.photoHeader}>
           <View>
             <Text style={styles.photoSectionTitle}>{isEditing ? 'Current Photos' : 'Listing Photos'}</Text>
@@ -892,32 +912,7 @@ export default function PostJobScreen({ navigation, route }) {
             Photo replacement is not included in this edit flow yet. Your current images will stay as they are.
           </Text>
         ) : null}
-      </AppCard>
-
-      <AppCard style={styles.formSection}>
-        <SectionLabel>Title</SectionLabel>
-        <AppTextInput
-          onChangeText={(value) => updateForm('title', value)}
-          placeholder={
-            selectedType === 'job' ? 'e.g. Help move furniture' : 'e.g. Canon camera for rent'
-          }
-          style={styles.softInput}
-          value={activeForm.title}
-        />
-
-        <SectionLabel>Description</SectionLabel>
-        <AppTextInput
-          multiline
-          onChangeText={(value) => updateForm('description', value)}
-          placeholder={
-            selectedType === 'job'
-              ? 'Describe what you need...'
-              : 'Describe the item, condition, and what is included...'
-          }
-          style={[styles.softInput, styles.descriptionInput]}
-          value={activeForm.description}
-        />
-      </AppCard>
+        </AppCard>
 
       <AppCard style={styles.formSection}>
         <SectionLabel>Category</SectionLabel>
@@ -1073,7 +1068,109 @@ export default function PostJobScreen({ navigation, route }) {
           variant="ghost"
         />
       ) : null}
-    </ScrollView>
+      </ScrollView>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsSuggestionsVisible(false)}
+        transparent
+        visible={isSuggestionsVisible}
+      >
+        <View style={styles.suggestionsModalOverlay}>
+          <Pressable
+            onPress={() => setIsSuggestionsVisible(false)}
+            style={styles.suggestionsModalBackdrop}
+          />
+          <View style={styles.suggestionsSheet}>
+            <View style={styles.suggestionsHandle} />
+            <View style={styles.suggestionsHeader}>
+              <View style={styles.suggestionsHeaderCopy}>
+                <Text style={styles.suggestionsTitle}>AI Listing Assistant</Text>
+                <Text style={styles.suggestionsSubtitle}>
+                  Review suggestions and apply only what you want to keep.
+                </Text>
+              </View>
+              <Pressable onPress={clearCopilotSuggestion}>
+                <Text style={styles.suggestionsClearLink}>Clear</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              contentContainerStyle={styles.suggestionsContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {copilotSuggestion ? (
+                <>
+                  <CopilotSuggestionRow
+                    label="Title"
+                    onApply={() => applyCopilotField('title')}
+                    value={copilotSuggestion.title}
+                  />
+                  <CopilotSuggestionRow
+                    label="Description"
+                    onApply={() => applyCopilotField('description')}
+                    value={copilotSuggestion.description}
+                  />
+                  <CopilotSuggestionRow
+                    label="Category"
+                    onApply={() => applyCopilotField('category')}
+                    value={copilotSuggestion.category}
+                  />
+                  <CopilotSuggestionRow
+                    label={selectedType === 'job' ? 'Budget' : currentItemListingMode === 'sell' ? 'Price' : 'Rate'}
+                    onApply={() => applyCopilotField('budget')}
+                    value={copilotSuggestion.budget}
+                  />
+                  {isDurationRequired ? (
+                    <CopilotSuggestionRow
+                      label="Duration"
+                      onApply={() => applyCopilotField('duration')}
+                      value={copilotSuggestion.duration}
+                    />
+                  ) : null}
+                  <CopilotSuggestionRow
+                    label="Urgency"
+                    onApply={() => applyCopilotField('urgent')}
+                    value={copilotSuggestion.urgent ? 'Mark as urgent / available now' : 'Keep normal urgency'}
+                  />
+
+                  {copilotSuggestion.qualityWarnings.length ? (
+                    <View style={styles.copilotWarningsWrap}>
+                      <Text style={styles.copilotWarningsTitle}>What to tighten before posting</Text>
+                      {copilotSuggestion.qualityWarnings.map((warning) => (
+                        <Text key={warning} style={styles.copilotWarningItem}>
+                          - {warning}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.suggestionsEmptyText}>
+                  Generate suggestions first, then they will appear here.
+                </Text>
+              )}
+            </ScrollView>
+
+            <View style={styles.suggestionsFooter}>
+              <AppButton
+                label="Close"
+                onPress={() => setIsSuggestionsVisible(false)}
+                style={styles.suggestionsFooterSecondary}
+                variant="secondary"
+              />
+              {copilotSuggestion ? (
+                <AppButton
+                  label="Apply all"
+                  onPress={() => applyCopilotField('all')}
+                  style={styles.suggestionsFooterPrimary}
+                />
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -1146,56 +1243,87 @@ const styles = StyleSheet.create({
   currentListingsColumn: {
     gap: 12,
   },
-  copilotCard: {
-    gap: 14,
-    padding: 18,
-  },
-  copilotHeader: {
+  assistantHeaderRow: {
     alignItems: 'flex-start',
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
   },
-  copilotHeaderCopy: {
+  assistantHeaderCopy: {
     flex: 1,
   },
-  copilotTitle: {
+  assistantTitle: {
     color: '#1D2433',
     fontSize: 18,
     fontWeight: '800',
   },
-  copilotSubtitle: {
+  assistantSubtitle: {
     color: '#7B8596',
     fontSize: 13,
     lineHeight: 19,
     marginTop: 4,
   },
-  copilotClearLink: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '700',
+  assistantHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  copilotPromptInput: {
+  assistantHeaderChip: {
+    backgroundColor: '#EAF2FF',
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  assistantHeaderChipText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  assistantExpandedBody: {
+    gap: 12,
+  },
+  assistantPromptInput: {
     minHeight: 90,
     textAlignVertical: 'top',
   },
-  copilotActionRow: {
+  assistantActionRow: {
     flexDirection: 'row',
     gap: 10,
   },
-  copilotPrimaryButton: {
+  assistantPrimaryButton: {
     flex: 1,
   },
-  copilotSecondaryButton: {
+  assistantSecondaryButton: {
     minWidth: 108,
   },
-  copilotNotice: {
+  assistantNotice: {
     color: colors.danger,
     fontSize: 13,
     lineHeight: 19,
   },
-  copilotSuggestionSection: {
-    gap: 10,
+  assistantCollapsedBar: {
+    backgroundColor: '#F4F7FD',
+    borderColor: '#D9E2F2',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  assistantCollapsedText: {
+    color: '#5E6B80',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  assistantCollapsedAction: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  assistantDivider: {
+    backgroundColor: '#E9EDF3',
+    height: 1,
+    marginVertical: 2,
+    width: '100%',
   },
   copilotSuggestionRow: {
     alignItems: 'flex-start',
@@ -1251,6 +1379,77 @@ const styles = StyleSheet.create({
     color: '#6E5A34',
     fontSize: 13,
     lineHeight: 19,
+  },
+  suggestionsModalOverlay: {
+    backgroundColor: 'rgba(18, 24, 36, 0.28)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  suggestionsModalBackdrop: {
+    flex: 1,
+  },
+  suggestionsSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '78%',
+    paddingBottom: 18,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+  },
+  suggestionsHandle: {
+    alignSelf: 'center',
+    backgroundColor: '#D6E2F4',
+    borderRadius: radius.pill,
+    height: 5,
+    marginBottom: 14,
+    width: 58,
+  },
+  suggestionsHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  suggestionsHeaderCopy: {
+    flex: 1,
+  },
+  suggestionsTitle: {
+    color: '#1D2433',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  suggestionsSubtitle: {
+    color: '#7B8596',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  suggestionsClearLink: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  suggestionsContent: {
+    gap: 10,
+    paddingBottom: 12,
+    paddingTop: 16,
+  },
+  suggestionsEmptyText: {
+    color: '#7B8596',
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  suggestionsFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  suggestionsFooterPrimary: {
+    flex: 1,
+  },
+  suggestionsFooterSecondary: {
+    minWidth: 112,
   },
   currentListingsEmpty: {
     color: '#7B8596',
