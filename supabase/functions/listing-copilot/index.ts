@@ -50,28 +50,21 @@ function getAllowedCategories(body: Record<string, unknown>, listingType: string
 }
 
 function extractOutputText(responsePayload: Record<string, unknown>) {
-  const output = Array.isArray(responsePayload.output) ? responsePayload.output : [];
-  const parts: string[] = [];
+  const candidates = Array.isArray(responsePayload.candidates) ? responsePayload.candidates : [];
+  const firstCandidate =
+    candidates[0] && typeof candidates[0] === 'object'
+      ? (candidates[0] as Record<string, unknown>)
+      : null;
+  const content =
+    firstCandidate?.content && typeof firstCandidate.content === 'object'
+      ? (firstCandidate.content as Record<string, unknown>)
+      : null;
+  const parts = Array.isArray(content?.parts) ? (content.parts as Array<Record<string, unknown>>) : [];
 
-  for (const item of output) {
-    if (!item || typeof item !== 'object') {
-      continue;
-    }
-
-    const content = Array.isArray((item as Record<string, unknown>).content)
-      ? ((item as Record<string, unknown>).content as Array<Record<string, unknown>>)
-      : [];
-
-    for (const entry of content) {
-      const text = typeof entry.text === 'string' ? entry.text : '';
-
-      if (text) {
-        parts.push(text);
-      }
-    }
-  }
-
-  return parts.join('').trim();
+  return parts
+    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+    .join('')
+    .trim();
 }
 
 function buildDraftSummary(draft: Record<string, unknown>, listingType: string, listingMode: string) {
@@ -124,7 +117,7 @@ function sanitizeSuggestion(
   };
 }
 
-function buildInstructions(listingType: string, listingMode: string, allowedCategories: string[]) {
+function buildPrompt(listingType: string, listingMode: string, allowedCategories: string[]) {
   const listingFocus =
     listingType === 'job'
       ? 'Clarify the task, time, effort, and what the helper should expect.'
@@ -138,11 +131,12 @@ function buildInstructions(listingType: string, listingMode: string, allowedCate
     'Do not invent facts, addresses, timing, or item condition that the user did not imply.',
     'Use concise, trustworthy, student-friendly language.',
     listingFocus,
-    `Choose category from this list only: ${allowedCategories.join(', ')}.`,
-    'Return stronger copy, but if information is missing, keep the wording general and mention gaps in qualityWarnings.',
-    'budget should be a plain number string with no currency symbol when you can make a reasonable suggestion. Otherwise return an empty string.',
-    'duration should be short natural language like "2 hours" or "3 days". Return an empty string when not applicable.',
+    `Choose category only from this list: ${allowedCategories.join(', ')}.`,
+    'If details are missing, keep the copy general and mention the missing details in qualityWarnings.',
+    'budget must be a plain number string with no currency symbol when you can make a reasonable suggestion.',
+    'duration should be short natural language like "2 hours" or "3 days". Use an empty string when not applicable.',
     'urgent should reflect whether the listing reads as time-sensitive or available now.',
+    'Return only the structured JSON requested by the schema.',
   ].join(' ');
 }
 
@@ -160,12 +154,12 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const openAiKey = Deno.env.get('OPENAI_API_KEY');
-    const openAiModel = Deno.env.get('OPENAI_MODEL') || 'gpt-4o-mini';
+    const geminiKey = Deno.env.get('GEMINI_API_KEY');
+    const geminiModel = Deno.env.get('GEMINI_MODEL') || 'gemini-3.5-flash';
 
-    if (!openAiKey) {
+    if (!geminiKey) {
       return buildJsonResponse(500, {
-        error: 'OPENAI_API_KEY is not configured for the listing-copilot function.',
+        error: 'GEMINI_API_KEY is not configured for the listing-copilot function.',
       });
     }
 
@@ -187,7 +181,7 @@ Deno.serve(async (request) => {
       !normalizeString(draft.location)
     ) {
       return buildJsonResponse(400, {
-        error: 'Add a short prompt or a few draft details first so AI has something to improve.',
+        error: 'Add a short prompt or a few draft details first so AI Listing Copilot has something to improve.',
       });
     }
 
@@ -204,62 +198,87 @@ Deno.serve(async (request) => {
         'qualityWarnings',
       ],
       properties: {
-        title: { type: 'string' },
-        description: { type: 'string' },
+        title: {
+          type: 'string',
+          description: 'A concise listing title that matches the user intent.',
+        },
+        description: {
+          type: 'string',
+          description: 'A short, clear listing description for students.',
+        },
         category: {
           type: 'string',
           enum: allowedCategories,
+          description: 'One category from the allowed list.',
         },
-        budget: { type: 'string' },
-        duration: { type: 'string' },
-        urgent: { type: 'boolean' },
+        budget: {
+          type: 'string',
+          description: 'Plain number string with no currency symbol.',
+        },
+        duration: {
+          type: 'string',
+          description: 'Short natural-language duration like 2 hours or 3 days, or empty string.',
+        },
+        urgent: {
+          type: 'boolean',
+          description: 'Whether the listing should be marked urgent or available now.',
+        },
         qualityWarnings: {
           type: 'array',
-          items: { type: 'string' },
+          description: 'Short suggestions for missing details that would improve the listing.',
+          items: {
+            type: 'string',
+          },
           maxItems: 4,
         },
       },
     };
 
-    const input = [
+    const contentText = [
       prompt ? `User prompt: ${prompt}` : 'User prompt: (none)',
       buildDraftSummary(draft, listingType, listingMode),
     ].join('\n\n');
 
-    const openAiResponse = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openAiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        input,
-        instructions: buildInstructions(listingType, listingMode, allowedCategories),
-        model: openAiModel,
-        store: false,
-        temperature: 0.4,
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'listing_copilot_suggestion',
-            schema,
-            strict: true,
-          },
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: contentText }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.4,
+            responseFormat: {
+              text: {
+                mimeType: 'application/json',
+                schema,
+              },
+            },
+          },
+          systemInstruction: {
+            parts: [{ text: buildPrompt(listingType, listingMode, allowedCategories) }],
+          },
+        }),
+      }
+    );
 
-    const responsePayload = (await openAiResponse.json()) as Record<string, unknown>;
+    const responsePayload = (await geminiResponse.json()) as Record<string, unknown>;
 
-    if (!openAiResponse.ok) {
+    if (!geminiResponse.ok) {
       const apiMessage =
         typeof responsePayload.error === 'object' &&
         responsePayload.error &&
         typeof (responsePayload.error as Record<string, unknown>).message === 'string'
           ? ((responsePayload.error as Record<string, unknown>).message as string)
-          : 'OpenAI request failed.';
+          : 'Gemini API request failed.';
 
-      return buildJsonResponse(openAiResponse.status, {
+      return buildJsonResponse(geminiResponse.status, {
         error: apiMessage,
       });
     }
@@ -268,7 +287,7 @@ Deno.serve(async (request) => {
 
     if (!outputText) {
       return buildJsonResponse(502, {
-        error: 'OpenAI returned an empty listing suggestion.',
+        error: 'Gemini returned an empty listing suggestion.',
       });
     }
 
