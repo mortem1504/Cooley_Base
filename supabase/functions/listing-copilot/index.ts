@@ -244,6 +244,7 @@ Deno.serve(async (request) => {
       {
         method: 'POST',
         headers: {
+          'x-goog-api-key': geminiKey,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -254,12 +255,8 @@ Deno.serve(async (request) => {
           ],
           generationConfig: {
             temperature: 0.4,
-            responseFormat: {
-              text: {
-                mimeType: 'application/json',
-                schema,
-              },
-            },
+            responseMimeType: 'application/json',
+            responseJsonSchema: schema,
           },
           systemInstruction: {
             parts: [{ text: buildPrompt(listingType, listingMode, allowedCategories) }],
