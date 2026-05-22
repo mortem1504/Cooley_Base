@@ -78,7 +78,7 @@ function SectionLabel({ children }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
-function CopilotSuggestionRow({ label, onApply, value }) {
+function CopilotSuggestionRow({ label, multiline = false, onApply, onChangeText, value }) {
   if (!value) {
     return null;
   }
@@ -87,7 +87,12 @@ function CopilotSuggestionRow({ label, onApply, value }) {
     <View style={styles.copilotSuggestionRow}>
       <View style={styles.copilotSuggestionCopy}>
         <Text style={styles.copilotSuggestionLabel}>{label}</Text>
-        <Text style={styles.copilotSuggestionValue}>{value}</Text>
+        <AppTextInput
+          multiline={multiline}
+          onChangeText={onChangeText}
+          style={[styles.copilotSuggestionInput, multiline && styles.copilotSuggestionInputMultiline]}
+          value={value}
+        />
       </View>
       <Pressable onPress={onApply} style={styles.copilotApplyChip}>
         <Text style={styles.copilotApplyChipText}>Apply</Text>
@@ -185,6 +190,7 @@ export default function PostJobScreen({ navigation, route }) {
   const [isResolvingLocation, setIsResolvingLocation] = useState(false);
   const [copilotPrompt, setCopilotPrompt] = useState('');
   const [copilotSuggestion, setCopilotSuggestion] = useState(null);
+  const [editableCopilotSuggestion, setEditableCopilotSuggestion] = useState(null);
   const [copilotNotice, setCopilotNotice] = useState('');
   const [isGeneratingCopilot, setIsGeneratingCopilot] = useState(false);
   const [isAssistantExpanded, setIsAssistantExpanded] = useState(false);
@@ -204,6 +210,7 @@ export default function PostJobScreen({ navigation, route }) {
     });
     setCopilotPrompt('');
     setCopilotSuggestion(null);
+    setEditableCopilotSuggestion(null);
     setCopilotNotice('');
     setIsGeneratingCopilot(false);
     setIsAssistantExpanded(false);
@@ -241,6 +248,7 @@ export default function PostJobScreen({ navigation, route }) {
       [editingListing.type]: buildPostFormFromListing(editingListing),
     }));
     setCopilotSuggestion(null);
+    setEditableCopilotSuggestion(null);
     setCopilotNotice('');
     setIsAssistantExpanded(false);
     setIsSuggestionsVisible(false);
@@ -276,6 +284,7 @@ export default function PostJobScreen({ navigation, route }) {
     }));
     setCopilotPrompt('');
     setCopilotSuggestion(null);
+    setEditableCopilotSuggestion(null);
     setCopilotNotice('');
     setIsAssistantExpanded(false);
     setIsSuggestionsVisible(false);
@@ -492,6 +501,7 @@ export default function PostJobScreen({ navigation, route }) {
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setCopilotSuggestion(nextSuggestion);
+      setEditableCopilotSuggestion(nextSuggestion);
       setIsSuggestionsVisible(true);
       setIsAssistantExpanded(false);
     } catch (error) {
@@ -504,7 +514,7 @@ export default function PostJobScreen({ navigation, route }) {
   };
 
   const applyCopilotField = (field) => {
-    if (!copilotSuggestion) {
+    if (!editableCopilotSuggestion) {
       return;
     }
 
@@ -513,14 +523,14 @@ export default function PostJobScreen({ navigation, route }) {
       if (field === 'all') {
         setIsSuggestionsVisible(false);
         return {
-          budget: copilotSuggestion.budget || activeForm.budget,
-          category: copilotSuggestion.category || activeForm.category,
-          description: copilotSuggestion.description || activeForm.description,
+          budget: editableCopilotSuggestion.budget || activeForm.budget,
+          category: editableCopilotSuggestion.category || activeForm.category,
+          description: editableCopilotSuggestion.description || activeForm.description,
           duration: isDurationRequired
-            ? copilotSuggestion.duration || activeForm.duration
+            ? editableCopilotSuggestion.duration || activeForm.duration
             : activeForm.duration,
-          title: copilotSuggestion.title || activeForm.title,
-          urgent: copilotSuggestion.urgent,
+          title: editableCopilotSuggestion.title || activeForm.title,
+          urgent: editableCopilotSuggestion.urgent,
         };
       }
 
@@ -529,7 +539,7 @@ export default function PostJobScreen({ navigation, route }) {
       }
 
       return {
-        [field]: copilotSuggestion[field],
+        [field]: editableCopilotSuggestion[field],
       };
     });
   };
@@ -537,8 +547,22 @@ export default function PostJobScreen({ navigation, route }) {
   const clearCopilotSuggestion = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCopilotSuggestion(null);
+    setEditableCopilotSuggestion(null);
     setCopilotNotice('');
     setIsSuggestionsVisible(false);
+  };
+
+  const updateEditableSuggestionField = (field, value) => {
+    setEditableCopilotSuggestion((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [field]: value,
+      };
+    });
   };
 
   const toggleAssistant = () => {
@@ -1099,47 +1123,63 @@ export default function PostJobScreen({ navigation, route }) {
               contentContainerStyle={styles.suggestionsContent}
               showsVerticalScrollIndicator={false}
             >
-              {copilotSuggestion ? (
+              {editableCopilotSuggestion ? (
                 <>
                   <CopilotSuggestionRow
                     label="Title"
                     onApply={() => applyCopilotField('title')}
-                    value={copilotSuggestion.title}
+                    onChangeText={(value) => updateEditableSuggestionField('title', value)}
+                    value={editableCopilotSuggestion.title}
                   />
                   <CopilotSuggestionRow
                     label="Description"
+                    multiline
                     onApply={() => applyCopilotField('description')}
-                    value={copilotSuggestion.description}
+                    onChangeText={(value) => updateEditableSuggestionField('description', value)}
+                    value={editableCopilotSuggestion.description}
                   />
                   <CopilotSuggestionRow
                     label="Category"
                     onApply={() => applyCopilotField('category')}
-                    value={copilotSuggestion.category}
+                    onChangeText={(value) => updateEditableSuggestionField('category', value)}
+                    value={editableCopilotSuggestion.category}
                   />
                   <CopilotSuggestionRow
                     label={selectedType === 'job' ? 'Budget' : currentItemListingMode === 'sell' ? 'Price' : 'Rate'}
                     onApply={() => applyCopilotField('budget')}
-                    value={copilotSuggestion.budget}
+                    onChangeText={(value) => updateEditableSuggestionField('budget', value)}
+                    value={editableCopilotSuggestion.budget}
                   />
                   {isDurationRequired ? (
                     <CopilotSuggestionRow
                       label="Duration"
                       onApply={() => applyCopilotField('duration')}
-                      value={copilotSuggestion.duration}
+                      onChangeText={(value) => updateEditableSuggestionField('duration', value)}
+                      value={editableCopilotSuggestion.duration}
                     />
                   ) : null}
                   <CopilotSuggestionRow
                     label="Urgency"
                     onApply={() => applyCopilotField('urgent')}
-                    value={copilotSuggestion.urgent ? 'Mark as urgent / available now' : 'Keep normal urgency'}
+                    onChangeText={(value) =>
+                      updateEditableSuggestionField(
+                        'urgent',
+                        value.toLowerCase().includes('urgent') || value.toLowerCase().includes('available')
+                      )
+                    }
+                    value={
+                      editableCopilotSuggestion.urgent
+                        ? 'Mark as urgent / available now'
+                        : 'Keep normal urgency'
+                    }
                   />
 
-                  {copilotSuggestion.qualityWarnings.length ? (
+                  {editableCopilotSuggestion.qualityWarnings.length ? (
                     <View style={styles.copilotWarningsWrap}>
                       <Text style={styles.copilotWarningsTitle}>What to tighten before posting</Text>
-                      {copilotSuggestion.qualityWarnings.map((warning) => (
+                      {editableCopilotSuggestion.qualityWarnings.map((warning, index) => (
                         <Text key={warning} style={styles.copilotWarningItem}>
-                          - {warning}
+                          {index + 1}. {warning}
                         </Text>
                       ))}
                     </View>
@@ -1159,7 +1199,7 @@ export default function PostJobScreen({ navigation, route }) {
                 style={styles.suggestionsFooterSecondary}
                 variant="secondary"
               />
-              {copilotSuggestion ? (
+              {editableCopilotSuggestion ? (
                 <AppButton
                   label="Apply all"
                   onPress={() => applyCopilotField('all')}
@@ -1344,6 +1384,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+  copilotSuggestionInput: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D9E2F2',
+    borderWidth: 1,
+    color: '#243040',
+    fontSize: 14,
+    lineHeight: 21,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  copilotSuggestionInputMultiline: {
+    minHeight: 132,
+    textAlignVertical: 'top',
   },
   copilotSuggestionValue: {
     color: '#243040',
