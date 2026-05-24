@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -40,6 +40,7 @@ const ITEM_LISTING_MODES = [
   { key: 'sell', label: 'Sell' },
 ];
 const MAX_LISTING_PHOTOS = 6;
+const COPILOT_APPLY_FEEDBACK_MS = 1400;
 
 function PostTypeCard({ option, onPress }) {
   return (
@@ -78,24 +79,64 @@ function SectionLabel({ children }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
-function CopilotSuggestionRow({ label, multiline = false, onApply, onChangeText, value }) {
+function CopilotSuggestionRow({
+  label,
+  multiline = false,
+  onApply,
+  onChangeText,
+  value,
+  isApplied = false,
+  isHighlighted = false,
+}) {
   if (!value) {
     return null;
   }
 
   return (
-    <View style={styles.copilotSuggestionRow}>
+    <View
+      style={[
+        styles.copilotSuggestionRow,
+        isApplied && styles.copilotSuggestionRowApplied,
+        isHighlighted && styles.copilotSuggestionRowHighlighted,
+      ]}
+    >
       <View style={styles.copilotSuggestionCopy}>
-        <Text style={styles.copilotSuggestionLabel}>{label}</Text>
+        <View style={styles.copilotSuggestionLabelRow}>
+          <Text style={styles.copilotSuggestionLabel}>{label}</Text>
+          {isApplied ? (
+            <Text
+              style={[
+                styles.copilotSuggestionStatus,
+                isHighlighted && styles.copilotSuggestionStatusHighlighted,
+              ]}
+            >
+              {isHighlighted ? 'Applied just now' : 'Applied'}
+            </Text>
+          ) : null}
+        </View>
         <AppTextInput
           multiline={multiline}
           onChangeText={onChangeText}
-          style={[styles.copilotSuggestionInput, multiline && styles.copilotSuggestionInputMultiline]}
+          style={[
+            styles.copilotSuggestionInput,
+            isApplied && styles.copilotSuggestionInputApplied,
+            multiline && styles.copilotSuggestionInputMultiline,
+          ]}
           value={value}
         />
       </View>
-      <Pressable onPress={onApply} style={styles.copilotApplyChip}>
-        <Text style={styles.copilotApplyChipText}>Apply</Text>
+      <Pressable
+        onPress={onApply}
+        style={({ pressed }) => [
+          styles.copilotApplyChip,
+          isApplied && styles.copilotApplyChipApplied,
+          isHighlighted && styles.copilotApplyChipHighlighted,
+          pressed && styles.copilotApplyChipPressed,
+        ]}
+      >
+        <Text style={[styles.copilotApplyChipText, isApplied && styles.copilotApplyChipTextApplied]}>
+          {isApplied ? 'Applied' : 'Apply'}
+        </Text>
       </Pressable>
     </View>
   );
@@ -195,6 +236,8 @@ export default function PostJobScreen({ navigation, route }) {
   const [isGeneratingCopilot, setIsGeneratingCopilot] = useState(false);
   const [isAssistantExpanded, setIsAssistantExpanded] = useState(false);
   const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
+  const [recentlyAppliedCopilotFields, setRecentlyAppliedCopilotFields] = useState({});
+  const copilotApplyTimeoutsRef = useRef({});
   const [forms, setForms] = useState({
     job: buildInitialPostForm('job'),
     rental: buildInitialPostForm('rental'),
@@ -204,6 +247,7 @@ export default function PostJobScreen({ navigation, route }) {
   const isEditing = Boolean(editingListing);
 
   const resetPostFlow = () => {
+    clearCopilotApplyFeedback();
     setForms({
       job: buildInitialPostForm('job'),
       rental: buildInitialPostForm('rental'),
@@ -236,6 +280,14 @@ export default function PostJobScreen({ navigation, route }) {
       (!isDurationRequired || activeForm.duration.trim()) &&
       activeForm.location.trim()
   );
+  const copilotFieldKeys = [
+    'title',
+    'description',
+    'category',
+    'budget',
+    ...(isDurationRequired ? ['duration'] : []),
+    'urgent',
+  ];
 
   useEffect(() => {
     if (!editingListing) {
@@ -252,6 +304,7 @@ export default function PostJobScreen({ navigation, route }) {
     setCopilotNotice('');
     setIsAssistantExpanded(false);
     setIsSuggestionsVisible(false);
+    clearCopilotApplyFeedback();
   }, [editingListing]);
 
   useEffect(() => {
@@ -262,11 +315,66 @@ export default function PostJobScreen({ navigation, route }) {
     return unsubscribe;
   }, [navigation, route?.params?.editListingId]);
 
+  useEffect(() => () => {
+    Object.values(copilotApplyTimeoutsRef.current).forEach(clearTimeout);
+  }, []);
+
   const clearEditIntent = () => {
     if (route?.params?.editListingId) {
       navigation.setParams({ editListingId: undefined });
     }
   };
+
+  const clearCopilotApplyFeedback = () => {
+    Object.values(copilotApplyTimeoutsRef.current).forEach(clearTimeout);
+    copilotApplyTimeoutsRef.current = {};
+    setRecentlyAppliedCopilotFields({});
+  };
+
+  const markCopilotFieldsApplied = (fields) => {
+    fields.forEach((field) => {
+      if (copilotApplyTimeoutsRef.current[field]) {
+        clearTimeout(copilotApplyTimeoutsRef.current[field]);
+      }
+
+      setRecentlyAppliedCopilotFields((prev) => ({
+        ...prev,
+        [field]: true,
+      }));
+
+      copilotApplyTimeoutsRef.current[field] = setTimeout(() => {
+        setRecentlyAppliedCopilotFields((prev) => {
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
+        delete copilotApplyTimeoutsRef.current[field];
+      }, COPILOT_APPLY_FEEDBACK_MS);
+    });
+  };
+
+  const normalizeCopilotFieldValue = (field, value) => {
+    if (field === 'urgent') {
+      return Boolean(value);
+    }
+
+    return String(value || '').trim();
+  };
+
+  const isCopilotFieldApplied = (field) => {
+    if (!editableCopilotSuggestion || !activeForm) {
+      return false;
+    }
+
+    return (
+      normalizeCopilotFieldValue(field, editableCopilotSuggestion[field]) ===
+      normalizeCopilotFieldValue(field, activeForm[field])
+    );
+  };
+
+  const areAllCopilotFieldsApplied = editableCopilotSuggestion
+    ? copilotFieldKeys.every((field) => isCopilotFieldApplied(field))
+    : false;
 
   const openListingEditor = (listingId) => {
     const listing = getListingForEdit(listingId);
@@ -288,6 +396,7 @@ export default function PostJobScreen({ navigation, route }) {
     setCopilotNotice('');
     setIsAssistantExpanded(false);
     setIsSuggestionsVisible(false);
+    clearCopilotApplyFeedback();
   };
 
   const updateForm = (key, value) => {
@@ -367,6 +476,7 @@ export default function PostJobScreen({ navigation, route }) {
     updateForm('listingMode', nextMode);
     setCopilotSuggestion(null);
     setCopilotNotice('');
+    clearCopilotApplyFeedback();
   };
 
   const goBack = () => {
@@ -500,6 +610,7 @@ export default function PostJobScreen({ navigation, route }) {
       });
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      clearCopilotApplyFeedback();
       setCopilotSuggestion(nextSuggestion);
       setEditableCopilotSuggestion(nextSuggestion);
       setIsSuggestionsVisible(true);
@@ -518,34 +629,38 @@ export default function PostJobScreen({ navigation, route }) {
       return;
     }
 
+    const fieldsToApply = field === 'all' ? copilotFieldKeys : [field];
+
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setFormValues(() => {
-      if (field === 'all') {
-        setIsSuggestionsVisible(false);
-        return {
-          budget: editableCopilotSuggestion.budget || activeForm.budget,
-          category: editableCopilotSuggestion.category || activeForm.category,
-          description: editableCopilotSuggestion.description || activeForm.description,
-          duration: isDurationRequired
-            ? editableCopilotSuggestion.duration || activeForm.duration
-            : activeForm.duration,
-          title: editableCopilotSuggestion.title || activeForm.title,
-          urgent: editableCopilotSuggestion.urgent,
-        };
-      }
+    if (field === 'all') {
+      setIsSuggestionsVisible(false);
+    }
 
-      if (field === 'duration' && !isDurationRequired) {
-        return {};
-      }
+    const nextFormValues =
+      field === 'all'
+        ? {
+            budget: editableCopilotSuggestion.budget || activeForm.budget,
+            category: editableCopilotSuggestion.category || activeForm.category,
+            description: editableCopilotSuggestion.description || activeForm.description,
+            duration: isDurationRequired
+              ? editableCopilotSuggestion.duration || activeForm.duration
+              : activeForm.duration,
+            title: editableCopilotSuggestion.title || activeForm.title,
+            urgent: editableCopilotSuggestion.urgent,
+          }
+        : field === 'duration' && !isDurationRequired
+          ? {}
+          : {
+              [field]: editableCopilotSuggestion[field],
+            };
 
-      return {
-        [field]: editableCopilotSuggestion[field],
-      };
-    });
+    setFormValues(() => nextFormValues);
+    markCopilotFieldsApplied(fieldsToApply);
   };
 
   const clearCopilotSuggestion = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    clearCopilotApplyFeedback();
     setCopilotSuggestion(null);
     setEditableCopilotSuggestion(null);
     setCopilotNotice('');
@@ -767,6 +882,7 @@ export default function PostJobScreen({ navigation, route }) {
                   setCopilotNotice('');
                   setIsAssistantExpanded(false);
                   setIsSuggestionsVisible(false);
+                  clearCopilotApplyFeedback();
                 }}
                 title={option.title}
               />
@@ -1126,12 +1242,16 @@ export default function PostJobScreen({ navigation, route }) {
               {editableCopilotSuggestion ? (
                 <>
                   <CopilotSuggestionRow
+                    isApplied={isCopilotFieldApplied('title')}
+                    isHighlighted={Boolean(recentlyAppliedCopilotFields.title)}
                     label="Title"
                     onApply={() => applyCopilotField('title')}
                     onChangeText={(value) => updateEditableSuggestionField('title', value)}
                     value={editableCopilotSuggestion.title}
                   />
                   <CopilotSuggestionRow
+                    isApplied={isCopilotFieldApplied('description')}
+                    isHighlighted={Boolean(recentlyAppliedCopilotFields.description)}
                     label="Description"
                     multiline
                     onApply={() => applyCopilotField('description')}
@@ -1139,12 +1259,16 @@ export default function PostJobScreen({ navigation, route }) {
                     value={editableCopilotSuggestion.description}
                   />
                   <CopilotSuggestionRow
+                    isApplied={isCopilotFieldApplied('category')}
+                    isHighlighted={Boolean(recentlyAppliedCopilotFields.category)}
                     label="Category"
                     onApply={() => applyCopilotField('category')}
                     onChangeText={(value) => updateEditableSuggestionField('category', value)}
                     value={editableCopilotSuggestion.category}
                   />
                   <CopilotSuggestionRow
+                    isApplied={isCopilotFieldApplied('budget')}
+                    isHighlighted={Boolean(recentlyAppliedCopilotFields.budget)}
                     label={selectedType === 'job' ? 'Budget' : currentItemListingMode === 'sell' ? 'Price' : 'Rate'}
                     onApply={() => applyCopilotField('budget')}
                     onChangeText={(value) => updateEditableSuggestionField('budget', value)}
@@ -1152,6 +1276,8 @@ export default function PostJobScreen({ navigation, route }) {
                   />
                   {isDurationRequired ? (
                     <CopilotSuggestionRow
+                      isApplied={isCopilotFieldApplied('duration')}
+                      isHighlighted={Boolean(recentlyAppliedCopilotFields.duration)}
                       label="Duration"
                       onApply={() => applyCopilotField('duration')}
                       onChangeText={(value) => updateEditableSuggestionField('duration', value)}
@@ -1159,6 +1285,8 @@ export default function PostJobScreen({ navigation, route }) {
                     />
                   ) : null}
                   <CopilotSuggestionRow
+                    isApplied={isCopilotFieldApplied('urgent')}
+                    isHighlighted={Boolean(recentlyAppliedCopilotFields.urgent)}
                     label="Urgency"
                     onApply={() => applyCopilotField('urgent')}
                     onChangeText={(value) =>
@@ -1201,7 +1329,8 @@ export default function PostJobScreen({ navigation, route }) {
               />
               {editableCopilotSuggestion ? (
                 <AppButton
-                  label="Apply all"
+                  disabled={areAllCopilotFieldsApplied}
+                  label={areAllCopilotFieldsApplied ? 'All applied' : 'Apply all'}
                   onPress={() => applyCopilotField('all')}
                   style={styles.suggestionsFooterPrimary}
                 />
@@ -1379,11 +1508,24 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 6,
   },
+  copilotSuggestionLabelRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
   copilotSuggestionLabel: {
     color: '#718096',
     fontSize: 11,
     fontWeight: '800',
     textTransform: 'uppercase',
+  },
+  copilotSuggestionStatus: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  copilotSuggestionStatusHighlighted: {
+    color: '#1F5FBF',
   },
   copilotSuggestionInput: {
     backgroundColor: '#FFFFFF',
@@ -1395,6 +1537,10 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  copilotSuggestionInputApplied: {
+    backgroundColor: '#F9FBFF',
+    borderColor: '#B7D0F8',
   },
   copilotSuggestionInputMultiline: {
     minHeight: 132,
@@ -1411,10 +1557,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
+  copilotApplyChipPressed: {
+    opacity: 0.86,
+    transform: [{ scale: 0.98 }],
+  },
+  copilotApplyChipApplied: {
+    backgroundColor: colors.primary,
+  },
+  copilotApplyChipHighlighted: {
+    backgroundColor: '#1F6FE5',
+  },
   copilotApplyChipText: {
     color: colors.primary,
     fontSize: 12,
     fontWeight: '800',
+  },
+  copilotApplyChipTextApplied: {
+    color: colors.card,
+  },
+  copilotSuggestionRowApplied: {
+    borderColor: '#B7D0F8',
+    backgroundColor: '#F8FBFF',
+  },
+  copilotSuggestionRowHighlighted: {
+    backgroundColor: '#EEF5FF',
   },
   copilotWarningsWrap: {
     backgroundColor: '#FFF7EA',
