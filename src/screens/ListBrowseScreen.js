@@ -1,35 +1,76 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AppButton from '../components/AppButton';
 import AppCard from '../components/AppCard';
 import BrowseJobCard from '../components/BrowseJobCard';
 import useAppState from '../hooks/useAppState';
 import { ROOT_ROUTES } from '../navigation/routes';
-import { jobCategories } from '../services/jobService';
 import { colors, radius, spacing } from '../utils/theme';
+
+const LISTING_FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'job', label: 'Jobs' },
+  { key: 'rental', label: 'Items' },
+];
+
+function getListingGroup(listing) {
+  if (listing?.type === 'rental') {
+    return 'item';
+  }
+
+  if (listing?.type === 'job') {
+    return 'job';
+  }
+
+  if (listing?.listingMode === 'rent' || listing?.listingMode === 'sell') {
+    return 'item';
+  }
+
+  return 'job';
+}
 
 function CategoryChip({ category, onPress, selected }) {
   return (
     <Pressable onPress={onPress} style={[styles.chip, selected && styles.chipActive]}>
-      <Text style={[styles.chipText, selected && styles.chipTextActive]}>{category}</Text>
+      <Text style={[styles.chipText, selected && styles.chipTextActive]}>{category.label}</Text>
     </Pressable>
   );
 }
 
 export default function ListBrowseScreen({ navigation }) {
-  const { filteredJobs, filters, isListingsLoading, listingsNotice, resetFilters, setFilters } =
+  const { filters, isListingsLoading, listingsNotice, nearbyListings, resetFilters, setFilters } =
     useAppState();
+  const [selectedListingFilter, setSelectedListingFilter] = useState('all');
+  const visibleListings = useMemo(
+    () =>
+      nearbyListings.filter((listing) => {
+        if (selectedListingFilter === 'job') {
+          return getListingGroup(listing) === 'job';
+        }
+
+        if (selectedListingFilter === 'rental') {
+          return getListingGroup(listing) === 'item';
+        }
+
+        return true;
+      }),
+    [nearbyListings, selectedListingFilter]
+  );
   const hasActiveFilters =
     Boolean(filters.search) ||
-    filters.category !== 'All' ||
     filters.maxPrice < 500 ||
-    filters.maxDistance < 25;
+    filters.maxDistance < 25 ||
+    selectedListingFilter !== 'all';
+  const handleResetNearbyFilters = () => {
+    setSelectedListingFilter('all');
+    resetFilters();
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.container}>
-      <Text style={styles.heading}>Local jobs near you</Text>
+      <Text style={styles.heading}>Nearby listings</Text>
       <Text style={styles.subheading}>
-        Filter by category, price, and distance to surface the best nearby short-term work.
+        Browse the same nearby jobs and items that power map suggestions and Discover.
       </Text>
 
       <ScrollView
@@ -37,12 +78,12 @@ export default function ListBrowseScreen({ navigation }) {
         horizontal
         showsHorizontalScrollIndicator={false}
       >
-        {jobCategories.map((category) => (
+        {LISTING_FILTER_OPTIONS.map((category) => (
           <CategoryChip
             category={category}
-            key={category}
-            onPress={() => setFilters((prev) => ({ ...prev, category }))}
-            selected={filters.category === category}
+            key={category.key}
+            onPress={() => setSelectedListingFilter(category.key)}
+            selected={selectedListingFilter === category.key}
           />
         ))}
       </ScrollView>
@@ -80,7 +121,7 @@ export default function ListBrowseScreen({ navigation }) {
 
       {isListingsLoading ? (
         <AppCard style={styles.messageCard}>
-          <Text style={styles.messageTitle}>Loading job list</Text>
+          <Text style={styles.messageTitle}>Loading nearby listings</Text>
           <Text style={styles.messageText}>Pulling the latest listings from Supabase.</Text>
         </AppCard>
       ) : listingsNotice ? (
@@ -88,8 +129,8 @@ export default function ListBrowseScreen({ navigation }) {
           <Text style={styles.messageTitle}>Could not load listings</Text>
           <Text style={styles.messageText}>{listingsNotice}</Text>
         </AppCard>
-      ) : filteredJobs.length ? (
-        filteredJobs.map((job) => (
+      ) : visibleListings.length ? (
+        visibleListings.map((job) => (
           <BrowseJobCard
             job={job}
             key={job.id}
@@ -98,14 +139,14 @@ export default function ListBrowseScreen({ navigation }) {
         ))
       ) : (
         <AppCard style={styles.messageCard}>
-          <Text style={styles.messageTitle}>No jobs match these filters</Text>
+          <Text style={styles.messageTitle}>No listings match these filters</Text>
           <Text style={styles.messageText}>
-            Adjust your category, price, or distance filters to see more listings.
+            Adjust your type, price, or distance filters to see more nearby results.
           </Text>
           {hasActiveFilters ? (
             <AppButton
               label="Reset filters"
-              onPress={resetFilters}
+              onPress={handleResetNearbyFilters}
               style={styles.resetButton}
               variant="secondary"
             />

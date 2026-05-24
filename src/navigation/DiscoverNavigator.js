@@ -31,7 +31,7 @@ export default function DiscoverNavigator() {
       <Stack.Screen
         component={ListBrowseScreen}
         name={DISCOVER_ROUTES.LIST}
-        options={{ title: 'Browse jobs' }}
+        options={{ title: 'Nearby listings' }}
       />
     </Stack.Navigator>
   );

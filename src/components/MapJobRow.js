@@ -8,7 +8,7 @@ import {
 } from '../utils/jobFormatters';
 import PriceDisplay from './PriceDisplay';
 
-export default function MapJobRow({ job, onPress }) {
+export default function MapJobRow({ job, onPress, reasonChips = [] }) {
   const badgeVariant = getListingBadgeVariant(job);
 
   return (
@@ -38,6 +38,15 @@ export default function MapJobRow({ job, onPress }) {
           </View>
         </View>
         <Text style={styles.meta}>{formatMapJobMeta(job)}</Text>
+        {reasonChips.length ? (
+          <View style={styles.reasonChipsRow}>
+            {reasonChips.map((reason) => (
+              <View key={`${job.id}-${reason}`} style={styles.reasonChip}>
+                <Text style={styles.reasonChipText}>{reason}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
       <PriceDisplay amount={job.price} currency="USD" size="sm" align="right" />
     </Pressable>
@@ -101,6 +110,23 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.secondaryText,
     fontSize: 12,
+  },
+  reasonChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: 8,
+  },
+  reasonChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  reasonChipText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
   },
   price: {
     color: colors.text,

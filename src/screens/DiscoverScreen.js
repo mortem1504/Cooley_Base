@@ -18,8 +18,8 @@ import MapJobRow from '../components/MapJobRow';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
 import { ROOT_ROUTES } from '../navigation/routes';
-import { buildMapRegion, isValidCoordinate } from '../services/locationService';
-import { formatJobPrice } from '../utils/jobFormatters';
+import { buildMapRegion } from '../services/locationService';
+import { formatJobDistance, formatJobPrice } from '../utils/jobFormatters';
 import { colors, radius, shadow, spacing } from '../utils/theme';
 
 const DEFAULT_MAX_DISTANCE_KM = 25;
@@ -36,15 +36,6 @@ const VIEW_OPTIONS = [
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-function matchesDiscoverSearch(listing, query) {
-  if (!query) {
-    return true;
-  }
-
-  const target = `${listing.title} ${listing.description} ${listing.category} ${listing.location}`.toLowerCase();
-  return target.includes(query.trim().toLowerCase());
 }
 
 function getListingGroup(listing) {
@@ -69,19 +60,38 @@ function isSellItemListing(listing) {
   );
 }
 
-function dedupeListings(collection) {
-  const seenKeys = new Set();
-
+function filterListingsByType(collection, selectedFilter) {
   return collection.filter((listing) => {
-    const nextKey = `${listing?.type || getListingGroup(listing)}:${listing?.id || ''}`;
-
-    if (!listing?.id || seenKeys.has(nextKey)) {
-      return false;
+    if (selectedFilter === 'job') {
+      return getListingGroup(listing) === 'job';
     }
 
-    seenKeys.add(nextKey);
+    if (selectedFilter === 'rental') {
+      return getListingGroup(listing) === 'item';
+    }
+
     return true;
   });
+}
+
+function buildClosestReasonChips(listing) {
+  const reasons = [];
+
+  if (Number.isFinite(Number(listing?.distance))) {
+    reasons.push(`${formatJobDistance(listing.distance)} away`);
+  }
+
+  if (listing?.urgent) {
+    reasons.push(
+      getListingGroup(listing) === 'item'
+        ? listing?.instantAccept
+          ? 'Available now'
+          : 'High demand nearby'
+        : 'Urgent nearby'
+    );
+  }
+
+  return reasons.slice(0, 2);
 }
 
 function SegmentedControl({ onChange, options, selectedValue }) {
@@ -111,16 +121,18 @@ export default function DiscoverScreen({ navigation }) {
     currentUser,
     filters,
     isListingsLoading,
-    pinnedListings,
     isLocationLoading,
-    jobs,
     listingsNotice,
     locationNotice,
-    preferredCurrency,
+    nearbyListings,
+    nearbyMapListings,
+    pinnedListings,
     refreshViewerLocation,
-    rentals,
     resetFilters,
     setFilters,
+    suggestedListings,
+    recentNearbyListings,
+    urgentNearbyListings,
     viewerLocation,
   } = useAppState();
   const [selectedListingFilter, setSelectedListingFilter] = useState('all');
@@ -128,39 +140,25 @@ export default function DiscoverScreen({ navigation }) {
   const mapRef = useRef(null);
   const topInset = useScreenTopInset(spacing.lg);
   const firstName = currentUser.name?.trim()?.split(' ')[0] || 'there';
-  const allListings = useMemo(
-    () =>
-      dedupeListings([...jobs, ...rentals]).sort(
-        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
-      ),
-    [jobs, rentals]
-  );
   const visibleListings = useMemo(
-    () =>
-      allListings.filter((listing) => {
-        const matchesType =
-          selectedListingFilter === 'all' ||
-          (selectedListingFilter === 'job' && getListingGroup(listing) === 'job') ||
-          (selectedListingFilter === 'rental' && getListingGroup(listing) === 'item');
-        const listingDistance = Number.isFinite(Number(listing.distance))
-          ? Number(listing.distance)
-          : DEFAULT_MAX_DISTANCE_KM;
-
-        return (
-          matchesType &&
-          matchesDiscoverSearch(listing, filters.search) &&
-          listing.price <= filters.maxPrice &&
-          listingDistance <= filters.maxDistance
-        );
-      }),
-    [allListings, filters.maxDistance, filters.maxPrice, filters.search, selectedListingFilter, preferredCurrency]
+    () => filterListingsByType(nearbyListings, selectedListingFilter),
+    [nearbyListings, selectedListingFilter]
   );
   const mappableListings = useMemo(
-    () =>
-      visibleListings.filter(
-        (listing) => isValidCoordinate(listing.latitude) && isValidCoordinate(listing.longitude)
-      ),
-    [visibleListings]
+    () => filterListingsByType(nearbyMapListings, selectedListingFilter),
+    [nearbyMapListings, selectedListingFilter]
+  );
+  const visibleSuggestedListings = useMemo(
+    () => filterListingsByType(suggestedListings, selectedListingFilter),
+    [selectedListingFilter, suggestedListings]
+  );
+  const visibleRecentListings = useMemo(
+    () => filterListingsByType(recentNearbyListings, selectedListingFilter),
+    [recentNearbyListings, selectedListingFilter]
+  );
+  const visibleUrgentListings = useMemo(
+    () => filterListingsByType(urgentNearbyListings, selectedListingFilter),
+    [selectedListingFilter, urgentNearbyListings]
   );
   const mapRegion = useMemo(
     () =>
@@ -174,19 +172,23 @@ export default function DiscoverScreen({ navigation }) {
   const visibleItemCount = visibleListings.filter((listing) => getListingGroup(listing) === 'item').length;
   const visiblePinnedListings = useMemo(
     () =>
-      pinnedListings.filter((listing) => {
-        if (selectedListingFilter === 'job') {
-          return getListingGroup(listing) === 'job';
-        }
-
-        if (selectedListingFilter === 'rental') {
-          return getListingGroup(listing) === 'item';
-        }
-
-        return true;
-      }),
+      filterListingsByType(pinnedListings, selectedListingFilter),
     [pinnedListings, selectedListingFilter]
   );
+  const featuredSuggestedListings = visibleSuggestedListings.slice(0, 3);
+  const closestRightNowListings = visibleListings
+    .filter((listing) => ['posted', 'available'].includes(listing.status) || listing.dbStatus === 'open')
+    .slice(0, 3)
+    .map((listing) => ({
+      ...listing,
+      suggestionReasons: buildClosestReasonChips(listing),
+    }));
+  const pulseListingsSource = visibleUrgentListings.length ? visibleUrgentListings : visibleRecentListings;
+  const pulseListings = pulseListingsSource.slice(0, 3);
+  const pulseSectionTitle = visibleUrgentListings.length ? 'Available now near you' : 'Fresh nearby picks';
+  const pulseSectionSubtitle = visibleUrgentListings.length
+    ? 'Listings that need quicker attention around your area.'
+    : 'Recently posted listings around you.';
   const hasActiveFilters =
     Boolean(filters.search) ||
     filters.maxPrice < DEFAULT_MAX_PRICE ||
@@ -198,6 +200,9 @@ export default function DiscoverScreen({ navigation }) {
       : selectedListingFilter === 'rental'
         ? 'Items'
         : 'All listings';
+  const locationSummaryText = viewerLocation?.address
+    ? `Suggestions update around ${viewerLocation.address}.`
+    : 'Turn on location to sharpen nearby suggestions and map ranking.';
 
   useEffect(() => {
     if (!mapRef.current || selectedView !== 'map') {
@@ -255,6 +260,19 @@ export default function DiscoverScreen({ navigation }) {
             placeholder="Search jobs, cameras, books, delivery, moving"
             value={filters.search}
           />
+          <View style={styles.locationSummaryRow}>
+            <View style={styles.locationSummaryChip}>
+              <Text style={styles.locationSummaryChipText}>
+                {viewerLocation ? 'Nearby mode on' : 'Location recommended'}
+              </Text>
+            </View>
+            <Pressable onPress={handleRecenter}>
+              <Text style={styles.locationSummaryAction}>
+                {isLocationLoading ? 'Refreshing...' : viewerLocation ? 'Refresh nearby' : 'Use my location'}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.locationSummaryText}>{locationSummaryText}</Text>
         </AppCard>
       </View>
 
@@ -338,6 +356,85 @@ export default function DiscoverScreen({ navigation }) {
           </AppCard>
         ) : selectedView === 'list' ? (
           <>
+            <AppCard style={styles.suggestionIntroCard}>
+              <Text style={styles.suggestionIntroTitle}>Why these listings are suggested</Text>
+              <Text style={styles.messageText}>
+                We rank nearby jobs and items using distance, freshness, urgency, and what you
+                search for.
+              </Text>
+            </AppCard>
+
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionCopy}>
+                <Text style={styles.sectionTitle}>Suggested for you</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Clear picks based on what is close, active, and relevant right now.
+                </Text>
+              </View>
+            </View>
+
+            {featuredSuggestedListings.length ? (
+              featuredSuggestedListings.map((listing) => (
+                <BrowseJobCard
+                  job={listing}
+                  key={`suggested-${listing.id}`}
+                  onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                  reasonChips={listing.suggestionReasons}
+                />
+              ))
+            ) : (
+              <AppCard style={styles.messageCard}>
+                <Text style={styles.messageTitle}>Suggestions will appear here</Text>
+                <Text style={styles.messageText}>
+                  {viewerLocation
+                    ? 'As more open listings are posted nearby, we will highlight the best matches first.'
+                    : 'Enable location and we will surface the best nearby jobs and items first.'}
+                </Text>
+              </AppCard>
+            )}
+
+            {closestRightNowListings.length ? (
+              <AppCard style={styles.mapListCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionCopy}>
+                    <Text style={styles.sectionTitle}>Closest right now</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      The quickest listings to act on within your current distance filter.
+                    </Text>
+                  </View>
+                </View>
+
+                {closestRightNowListings.map((listing) => (
+                  <MapJobRow
+                    job={listing}
+                    key={`closest-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                    reasonChips={listing.suggestionReasons}
+                  />
+                ))}
+              </AppCard>
+            ) : null}
+
+            {pulseListings.length ? (
+              <AppCard style={styles.mapListCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionCopy}>
+                    <Text style={styles.sectionTitle}>{pulseSectionTitle}</Text>
+                    <Text style={styles.sectionSubtitle}>{pulseSectionSubtitle}</Text>
+                  </View>
+                </View>
+
+                {pulseListings.map((listing) => (
+                  <MapJobRow
+                    job={listing}
+                    key={`pulse-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                    reasonChips={listing.suggestionReasons}
+                  />
+                ))}
+              </AppCard>
+            ) : null}
+
             <View style={styles.sectionHeader}>
               <View style={styles.sectionCopy}>
                 <Text style={styles.sectionTitle}>{activeListingLabel} near you</Text>
@@ -387,7 +484,7 @@ export default function DiscoverScreen({ navigation }) {
                 <View style={styles.sectionCopy}>
                   <Text style={styles.sectionTitle}>{activeListingLabel} on the map</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Filtered pins update automatically as you switch tabs above.
+                    Pins update from the same nearby suggestion system used in list view.
                   </Text>
                 </View>
                 <Pressable onPress={handleRecenter} style={styles.recenterChip}>
@@ -451,9 +548,9 @@ export default function DiscoverScreen({ navigation }) {
             <AppCard style={styles.mapListCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionCopy}>
-                  <Text style={styles.sectionTitle}>Pinned listings</Text>
+                  <Text style={styles.sectionTitle}>Suggested on this map</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Listings you saved for quick access later.
+                    We explain each pick so users know why it appears here.
                   </Text>
                 </View>
                 {hasActiveFilters ? (
@@ -463,20 +560,42 @@ export default function DiscoverScreen({ navigation }) {
                 ) : null}
               </View>
 
-              {visiblePinnedListings.length ? (
-                visiblePinnedListings.map((listing) => (
+              {featuredSuggestedListings.length ? (
+                featuredSuggestedListings.map((listing) => (
                   <MapJobRow
                     job={listing}
-                    key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
+                    key={`map-suggested-${listing.id}`}
                     onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                    reasonChips={listing.suggestionReasons}
                   />
                 ))
               ) : (
                 <Text style={styles.messageText}>
-                  Pin a listing from its detail screen and it will show up here.
+                  Move around the map or widen your distance filter to see more nearby suggestions.
                 </Text>
               )}
             </AppCard>
+
+            {visiblePinnedListings.length ? (
+              <AppCard style={styles.mapListCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionCopy}>
+                    <Text style={styles.sectionTitle}>Pinned listings</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Listings you saved for quick access later.
+                    </Text>
+                  </View>
+                </View>
+
+                {visiblePinnedListings.map((listing) => (
+                  <MapJobRow
+                    job={listing}
+                    key={`pinned-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                  />
+                ))}
+              </AppCard>
+            ) : null}
           </>
         )}
       </View>
@@ -503,6 +622,33 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
+  },
+  locationSummaryRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  locationSummaryChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  locationSummaryChipText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  locationSummaryAction: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  locationSummaryText: {
+    color: colors.secondaryText,
+    fontSize: 13,
+    lineHeight: 19,
   },
   stickyHeader: {
     backgroundColor: colors.background,
@@ -713,6 +859,15 @@ const styles = StyleSheet.create({
   mapListCard: {
     gap: spacing.md,
     padding: spacing.lg,
+  },
+  suggestionIntroCard: {
+    gap: spacing.xs,
+    padding: spacing.lg,
+  },
+  suggestionIntroTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
   },
   messageCard: {
     gap: spacing.xs,
