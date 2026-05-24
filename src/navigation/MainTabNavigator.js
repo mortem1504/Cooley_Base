@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -22,6 +23,8 @@ import { DISCOVER_ROUTES, TAB_ROUTES, WALLET_ROUTES } from './routes';
 
 const Tab = createBottomTabNavigator();
 const SIDEBAR_WIDTH = 292;
+const EDGE_SWIPE_WIDTH = 18;
+const EDGE_SWIPE_TRIGGER_DX = 22;
 
 const MAIN_DRAWER_ITEMS = [
   { key: TAB_ROUTES.DISCOVER, label: 'Discover' },
@@ -108,6 +111,21 @@ export default function MainTabNavigator() {
   const openSidebar = () => setIsSidebarOpen(true);
   const closeSidebar = () => setIsSidebarOpen(false);
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
+  const edgeSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gestureState) =>
+          !isSidebarOpen &&
+          gestureState.dx > 12 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
+        onPanResponderRelease: (_event, gestureState) => {
+          if (gestureState.dx >= EDGE_SWIPE_TRIGGER_DX) {
+            openSidebar();
+          }
+        },
+      }),
+    [isSidebarOpen]
+  );
 
   const handleTabBarBridgeUpdate = useCallback((nextBridge) => {
     tabNavigationRef.current = nextBridge.navigation;
@@ -196,6 +214,13 @@ export default function MainTabNavigator() {
           <Tab.Screen component={MessagesScreen} name={TAB_ROUTES.MESSAGES} />
           <Tab.Screen component={ProfileScreen} name={TAB_ROUTES.PROFILE} />
         </Tab.Navigator>
+
+        {!isSidebarOpen ? (
+          <View
+            {...edgeSwipeResponder.panHandlers}
+            style={styles.edgeSwipeZone}
+          />
+        ) : null}
 
         {isSidebarOpen ? (
           <Pressable onPress={closeSidebar} style={styles.scrimPressable}>
@@ -287,6 +312,14 @@ const styles = StyleSheet.create({
   shell: {
     backgroundColor: colors.background,
     flex: 1,
+  },
+  edgeSwipeZone: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+    width: EDGE_SWIPE_WIDTH,
+    zIndex: 10,
   },
   scrimPressable: {
     ...StyleSheet.absoluteFillObject,
