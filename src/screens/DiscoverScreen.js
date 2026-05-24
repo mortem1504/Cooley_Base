@@ -116,6 +116,32 @@ function SegmentedControl({ onChange, options, selectedValue }) {
   );
 }
 
+function SectionJumpRail({ activeKey, items, onPress, topOffset }) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <View style={[styles.sectionJumpRail, { top: topOffset }]}>
+      {items.map((item) => {
+        const isActive = activeKey === item.key;
+
+        return (
+          <Pressable
+            key={item.key}
+            onPress={() => onPress(item.key)}
+            style={[styles.sectionJumpChip, isActive && styles.sectionJumpChipActive]}
+          >
+            <Text style={[styles.sectionJumpChipText, isActive && styles.sectionJumpChipTextActive]}>
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function DiscoverScreen({ navigation }) {
   const {
     currentUser,
@@ -138,7 +164,13 @@ export default function DiscoverScreen({ navigation }) {
   const [selectedListingFilter, setSelectedListingFilter] = useState('all');
   const [selectedView, setSelectedView] = useState('list');
   const mapRef = useRef(null);
+  const scrollRef = useRef(null);
+  const sectionLocalOffsetsRef = useRef({});
   const topInset = useScreenTopInset(spacing.lg);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [bodyContentOffsetY, setBodyContentOffsetY] = useState(0);
+  const [sectionOffsets, setSectionOffsets] = useState({});
+  const [activeSectionKey, setActiveSectionKey] = useState('suggested');
   const firstName = currentUser.name?.trim()?.split(' ')[0] || 'there';
   const visibleListings = useMemo(
     () => filterListingsByType(nearbyListings, selectedListingFilter),
@@ -203,6 +235,24 @@ export default function DiscoverScreen({ navigation }) {
   const locationSummaryText = viewerLocation?.address
     ? `Suggestions update around ${viewerLocation.address}.`
     : 'Turn on location to sharpen nearby suggestions and map ranking.';
+  const sectionRailItems = useMemo(() => {
+    const items = [{ key: 'suggested', label: 'For you' }];
+
+    if (closestRightNowListings.length) {
+      items.push({ key: 'closest', label: 'Closest' });
+    }
+
+    if (pulseListings.length) {
+      items.push({
+        key: 'pulse',
+        label: visibleUrgentListings.length ? 'Now' : 'Fresh',
+      });
+    }
+
+    items.push({ key: 'all', label: 'All' });
+    return items;
+  }, [closestRightNowListings.length, pulseListings.length, visibleUrgentListings.length]);
+  const sectionRailTopOffset = topInset + stickyHeaderHeight + spacing.md;
 
   useEffect(() => {
     if (!mapRef.current || selectedView !== 'map') {
@@ -211,6 +261,22 @@ export default function DiscoverScreen({ navigation }) {
 
     mapRef.current.animateToRegion(mapRegion, 450);
   }, [mapRegion, selectedView]);
+
+  useEffect(() => {
+    const nextOffsets = {};
+
+    Object.entries(sectionLocalOffsetsRef.current).forEach(([key, localOffset]) => {
+      nextOffsets[key] = bodyContentOffsetY + localOffset;
+    });
+
+    setSectionOffsets(nextOffsets);
+  }, [bodyContentOffsetY, sectionRailItems]);
+
+  useEffect(() => {
+    if (!sectionRailItems.some((item) => item.key === activeSectionKey)) {
+      setActiveSectionKey(sectionRailItems[0]?.key || 'suggested');
+    }
+  }, [activeSectionKey, sectionRailItems]);
 
   const handleSelectListingFilter = (nextFilter) => {
     if (nextFilter === selectedListingFilter) {
@@ -250,85 +316,145 @@ export default function DiscoverScreen({ navigation }) {
     }
   };
 
+  const handleBodyContentLayout = ({ nativeEvent }) => {
+    const nextY = nativeEvent.layout.y;
+    setBodyContentOffsetY((prev) => (prev === nextY ? prev : nextY));
+  };
+
+  const handleSectionLayout = (key, localOffset) => {
+    sectionLocalOffsetsRef.current[key] = localOffset;
+    const nextAbsoluteOffset = bodyContentOffsetY + localOffset;
+
+    setSectionOffsets((prev) => (
+      prev[key] === nextAbsoluteOffset
+        ? prev
+        : {
+            ...prev,
+            [key]: nextAbsoluteOffset,
+          }
+    ));
+  };
+
+  const handleJumpToSection = (key) => {
+    const targetOffset = sectionOffsets[key];
+
+    if (!Number.isFinite(targetOffset)) {
+      return;
+    }
+
+    const scrollTarget = Math.max(0, targetOffset - stickyHeaderHeight - spacing.md);
+    scrollRef.current?.scrollTo({ animated: true, y: scrollTarget });
+    setActiveSectionKey(key);
+  };
+
+  const handleScroll = ({ nativeEvent }) => {
+    const markerOffset = nativeEvent.contentOffset.y + stickyHeaderHeight + spacing.lg;
+    let nextActiveKey = sectionRailItems[0]?.key || 'suggested';
+
+    sectionRailItems.forEach((item) => {
+      const targetOffset = sectionOffsets[item.key];
+
+      if (Number.isFinite(targetOffset) && markerOffset >= targetOffset) {
+        nextActiveKey = item.key;
+      }
+    });
+
+    setActiveSectionKey((prev) => (prev === nextActiveKey ? prev : nextActiveKey));
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[1]} style={styles.container}>
-      <View style={[styles.heroWrap, { paddingTop: topInset }]}>
-        <AppCard style={styles.heroCard}>
-          <Text style={styles.greeting}>Hello, {firstName}</Text>
-          <AppTextInput
-            onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
-            placeholder="Search jobs, cameras, books, delivery, moving"
-            value={filters.search}
-          />
-          <View style={styles.locationSummaryRow}>
-            <View style={styles.locationSummaryChip}>
-              <Text style={styles.locationSummaryChipText}>
-                {viewerLocation ? 'Nearby mode on' : 'Location recommended'}
-              </Text>
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        onScroll={handleScroll}
+        ref={scrollRef}
+        scrollEventThrottle={16}
+        stickyHeaderIndices={[1]}
+        style={styles.container}
+      >
+        <View style={[styles.heroWrap, { paddingTop: topInset }]}>
+          <AppCard style={styles.heroCard}>
+            <Text style={styles.greeting}>Hello, {firstName}</Text>
+            <AppTextInput
+              onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
+              placeholder="Search jobs, cameras, books, delivery, moving"
+              value={filters.search}
+            />
+            <View style={styles.locationSummaryRow}>
+              <View style={styles.locationSummaryChip}>
+                <Text style={styles.locationSummaryChipText}>
+                  {viewerLocation ? 'Nearby mode on' : 'Location recommended'}
+                </Text>
+              </View>
+              <Pressable onPress={handleRecenter}>
+                <Text style={styles.locationSummaryAction}>
+                  {isLocationLoading ? 'Refreshing...' : viewerLocation ? 'Refresh nearby' : 'Use my location'}
+                </Text>
+              </Pressable>
             </View>
-            <Pressable onPress={handleRecenter}>
-              <Text style={styles.locationSummaryAction}>
-                {isLocationLoading ? 'Refreshing...' : viewerLocation ? 'Refresh nearby' : 'Use my location'}
-              </Text>
+            <Text style={styles.locationSummaryText}>{locationSummaryText}</Text>
+          </AppCard>
+        </View>
+
+        <View
+          onLayout={({ nativeEvent }) => setStickyHeaderHeight(nativeEvent.layout.height)}
+          style={styles.stickyHeader}
+        >
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>Category</Text>
+            <SegmentedControl
+              onChange={handleSelectListingFilter}
+              options={LISTING_FILTER_OPTIONS}
+              selectedValue={selectedListingFilter}
+            />
+          </View>
+
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>View</Text>
+            <SegmentedControl
+              onChange={handleSelectView}
+              options={VIEW_OPTIONS}
+              selectedValue={selectedView}
+            />
+          </View>
+
+          <View style={styles.quickFilterRow}>
+            <Pressable
+              onPress={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxPrice: prev.maxPrice === DEFAULT_MAX_PRICE ? 100 : DEFAULT_MAX_PRICE,
+                }))
+              }
+              style={styles.quickFilterPressable}
+            >
+              <AppCard style={styles.quickFilterCard}>
+                <Text style={styles.quickFilterLabel}>Price</Text>
+                <Text style={styles.quickFilterValue}>Up to ${filters.maxPrice}</Text>
+              </AppCard>
+            </Pressable>
+
+            <Pressable
+              onPress={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxDistance: prev.maxDistance === DEFAULT_MAX_DISTANCE_KM ? 5 : DEFAULT_MAX_DISTANCE_KM,
+                }))
+              }
+              style={styles.quickFilterPressable}
+            >
+              <AppCard style={styles.quickFilterCard}>
+                <Text style={styles.quickFilterLabel}>Distance</Text>
+                <Text style={styles.quickFilterValue}>{filters.maxDistance} km</Text>
+              </AppCard>
             </Pressable>
           </View>
-          <Text style={styles.locationSummaryText}>{locationSummaryText}</Text>
-        </AppCard>
-      </View>
-
-      <View style={styles.stickyHeader}>
-        <View style={styles.controlGroup}>
-          <Text style={styles.controlLabel}>Category</Text>
-          <SegmentedControl
-            onChange={handleSelectListingFilter}
-            options={LISTING_FILTER_OPTIONS}
-            selectedValue={selectedListingFilter}
-          />
         </View>
 
-        <View style={styles.controlGroup}>
-          <Text style={styles.controlLabel}>View</Text>
-          <SegmentedControl
-            onChange={handleSelectView}
-            options={VIEW_OPTIONS}
-            selectedValue={selectedView}
-          />
-        </View>
-
-        <View style={styles.quickFilterRow}>
-          <Pressable
-            onPress={() =>
-              setFilters((prev) => ({
-                ...prev,
-                maxPrice: prev.maxPrice === DEFAULT_MAX_PRICE ? 100 : DEFAULT_MAX_PRICE,
-              }))
-            }
-            style={styles.quickFilterPressable}
-          >
-            <AppCard style={styles.quickFilterCard}>
-              <Text style={styles.quickFilterLabel}>Price</Text>
-              <Text style={styles.quickFilterValue}>Up to ${filters.maxPrice}</Text>
-            </AppCard>
-          </Pressable>
-
-          <Pressable
-            onPress={() =>
-              setFilters((prev) => ({
-                ...prev,
-                maxDistance: prev.maxDistance === DEFAULT_MAX_DISTANCE_KM ? 5 : DEFAULT_MAX_DISTANCE_KM,
-              }))
-            }
-            style={styles.quickFilterPressable}
-          >
-            <AppCard style={styles.quickFilterCard}>
-              <Text style={styles.quickFilterLabel}>Distance</Text>
-              <Text style={styles.quickFilterValue}>{filters.maxDistance} km</Text>
-            </AppCard>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.bodyContent}>
+        <View
+          onLayout={handleBodyContentLayout}
+          style={[styles.bodyContent, selectedView === 'list' && styles.bodyContentWithRail]}
+        >
         <View style={styles.statRow}>
           <AppCard style={styles.statCard}>
             <Text style={styles.statValue}>{visibleListings.length}</Text>
@@ -356,126 +482,134 @@ export default function DiscoverScreen({ navigation }) {
           </AppCard>
         ) : selectedView === 'list' ? (
           <>
-            <AppCard style={styles.suggestionIntroCard}>
-              <Text style={styles.suggestionIntroTitle}>Why these listings are suggested</Text>
-              <Text style={styles.messageText}>
-                We rank nearby jobs and items using distance, freshness, urgency, and what you
-                search for.
-              </Text>
-            </AppCard>
-
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionCopy}>
-                <Text style={styles.sectionTitle}>Suggested for you</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Clear picks based on what is close, active, and relevant right now.
-                </Text>
-              </View>
-            </View>
-
-            {featuredSuggestedListings.length ? (
-              featuredSuggestedListings.map((listing) => (
-                <BrowseJobCard
-                  job={listing}
-                  key={`suggested-${listing.id}`}
-                  onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
-                  reasonChips={listing.suggestionReasons}
-                />
-              ))
-            ) : (
-              <AppCard style={styles.messageCard}>
-                <Text style={styles.messageTitle}>Suggestions will appear here</Text>
+            <View onLayout={({ nativeEvent }) => handleSectionLayout('suggested', nativeEvent.layout.y)}>
+              <AppCard style={styles.suggestionIntroCard}>
+                <Text style={styles.suggestionIntroTitle}>Why these listings are suggested</Text>
                 <Text style={styles.messageText}>
-                  {viewerLocation
-                    ? 'As more open listings are posted nearby, we will highlight the best matches first.'
-                    : 'Enable location and we will surface the best nearby jobs and items first.'}
+                  We rank nearby jobs and items using distance, freshness, urgency, and what you
+                  search for.
                 </Text>
               </AppCard>
-            )}
 
-            {closestRightNowListings.length ? (
-              <AppCard style={styles.mapListCard}>
-                <View style={styles.sectionHeader}>
-                  <View style={styles.sectionCopy}>
-                    <Text style={styles.sectionTitle}>Closest right now</Text>
-                    <Text style={styles.sectionSubtitle}>
-                      The quickest listings to act on within your current distance filter.
-                    </Text>
-                  </View>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionCopy}>
+                  <Text style={styles.sectionTitle}>Suggested for you</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Clear picks based on what is close, active, and relevant right now.
+                  </Text>
                 </View>
+              </View>
 
-                {closestRightNowListings.map((listing) => (
-                  <MapJobRow
+              {featuredSuggestedListings.length ? (
+                featuredSuggestedListings.map((listing) => (
+                  <BrowseJobCard
                     job={listing}
-                    key={`closest-${listing.id}`}
+                    key={`suggested-${listing.id}`}
                     onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
                     reasonChips={listing.suggestionReasons}
                   />
-                ))}
-              </AppCard>
+                ))
+              ) : (
+                <AppCard style={styles.messageCard}>
+                  <Text style={styles.messageTitle}>Suggestions will appear here</Text>
+                  <Text style={styles.messageText}>
+                    {viewerLocation
+                      ? 'As more open listings are posted nearby, we will highlight the best matches first.'
+                      : 'Enable location and we will surface the best nearby jobs and items first.'}
+                  </Text>
+                </AppCard>
+              )}
+            </View>
+
+            {closestRightNowListings.length ? (
+              <View onLayout={({ nativeEvent }) => handleSectionLayout('closest', nativeEvent.layout.y)}>
+                <AppCard style={styles.mapListCard}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionCopy}>
+                      <Text style={styles.sectionTitle}>Closest right now</Text>
+                      <Text style={styles.sectionSubtitle}>
+                        The quickest listings to act on within your current distance filter.
+                      </Text>
+                    </View>
+                  </View>
+
+                  {closestRightNowListings.map((listing) => (
+                    <MapJobRow
+                      job={listing}
+                      key={`closest-${listing.id}`}
+                      onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                      reasonChips={listing.suggestionReasons}
+                    />
+                  ))}
+                </AppCard>
+              </View>
             ) : null}
 
             {pulseListings.length ? (
-              <AppCard style={styles.mapListCard}>
-                <View style={styles.sectionHeader}>
-                  <View style={styles.sectionCopy}>
-                    <Text style={styles.sectionTitle}>{pulseSectionTitle}</Text>
-                    <Text style={styles.sectionSubtitle}>{pulseSectionSubtitle}</Text>
+              <View onLayout={({ nativeEvent }) => handleSectionLayout('pulse', nativeEvent.layout.y)}>
+                <AppCard style={styles.mapListCard}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionCopy}>
+                      <Text style={styles.sectionTitle}>{pulseSectionTitle}</Text>
+                      <Text style={styles.sectionSubtitle}>{pulseSectionSubtitle}</Text>
+                    </View>
                   </View>
-                </View>
 
-                {pulseListings.map((listing) => (
-                  <MapJobRow
-                    job={listing}
-                    key={`pulse-${listing.id}`}
-                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
-                    reasonChips={listing.suggestionReasons}
-                  />
-                ))}
-              </AppCard>
+                  {pulseListings.map((listing) => (
+                    <MapJobRow
+                      job={listing}
+                      key={`pulse-${listing.id}`}
+                      onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                      reasonChips={listing.suggestionReasons}
+                    />
+                  ))}
+                </AppCard>
+              </View>
             ) : null}
 
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionCopy}>
-                <Text style={styles.sectionTitle}>{activeListingLabel} near you</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Showing {visibleListings.length} result{visibleListings.length === 1 ? '' : 's'} in
-                  card view.
-                </Text>
-              </View>
-              {hasActiveFilters ? (
-                <Pressable onPress={handleResetDiscoverFilters}>
-                  <Text style={styles.linkText}>Reset</Text>
-                </Pressable>
-              ) : null}
-            </View>
-
-            {visibleListings.length ? (
-              visibleListings.map((listing) => (
-                <BrowseJobCard
-                  job={listing}
-                  key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
-                  onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
-                />
-              ))
-            ) : (
-              <AppCard style={styles.messageCard}>
-                <Text style={styles.messageTitle}>No listings match right now</Text>
-                <Text style={styles.messageText}>
-                  {hasActiveFilters
-                    ? 'Try widening the price or distance filters, or switch back to All.'
-                    : 'New campus jobs and item listings will show up here automatically.'}
-                </Text>
+            <View onLayout={({ nativeEvent }) => handleSectionLayout('all', nativeEvent.layout.y)}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionCopy}>
+                  <Text style={styles.sectionTitle}>{activeListingLabel} near you</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Showing {visibleListings.length} result{visibleListings.length === 1 ? '' : 's'} in
+                    card view.
+                  </Text>
+                </View>
                 {hasActiveFilters ? (
-                  <AppButton
-                    label="Reset filters"
-                    onPress={handleResetDiscoverFilters}
-                    style={styles.resetButton}
-                    variant="secondary"
-                  />
+                  <Pressable onPress={handleResetDiscoverFilters}>
+                    <Text style={styles.linkText}>Reset</Text>
+                  </Pressable>
                 ) : null}
-              </AppCard>
-            )}
+              </View>
+
+              {visibleListings.length ? (
+                visibleListings.map((listing) => (
+                  <BrowseJobCard
+                    job={listing}
+                    key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                  />
+                ))
+              ) : (
+                <AppCard style={styles.messageCard}>
+                  <Text style={styles.messageTitle}>No listings match right now</Text>
+                  <Text style={styles.messageText}>
+                    {hasActiveFilters
+                      ? 'Try widening the price or distance filters, or switch back to All.'
+                      : 'New campus jobs and item listings will show up here automatically.'}
+                  </Text>
+                  {hasActiveFilters ? (
+                    <AppButton
+                      label="Reset filters"
+                      onPress={handleResetDiscoverFilters}
+                      style={styles.resetButton}
+                      variant="secondary"
+                    />
+                  ) : null}
+                </AppCard>
+              )}
+            </View>
           </>
         ) : (
           <>
@@ -598,12 +732,26 @@ export default function DiscoverScreen({ navigation }) {
             ) : null}
           </>
         )}
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+
+      {selectedView === 'list' && stickyHeaderHeight > 0 && !isListingsLoading && !listingsNotice ? (
+        <SectionJumpRail
+          activeKey={activeSectionKey}
+          items={sectionRailItems}
+          onPress={handleJumpToSection}
+          topOffset={sectionRailTopOffset}
+        />
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: colors.background,
+    flex: 1,
+  },
   container: {
     backgroundColor: colors.background,
     flex: 1,
@@ -726,6 +874,9 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
+  },
+  bodyContentWithRail: {
+    paddingRight: spacing.xxl + 44,
   },
   statRow: {
     flexDirection: 'row',
@@ -868,6 +1019,40 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '800',
+  },
+  sectionJumpRail: {
+    alignItems: 'stretch',
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderColor: 'rgba(217, 226, 242, 0.98)',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    gap: 8,
+    padding: 8,
+    position: 'absolute',
+    right: spacing.md,
+    width: 78,
+    ...shadow,
+  },
+  sectionJumpChip: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  sectionJumpChipActive: {
+    backgroundColor: colors.primary,
+  },
+  sectionJumpChipText: {
+    color: colors.secondaryText,
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  sectionJumpChipTextActive: {
+    color: colors.card,
   },
   messageCard: {
     gap: spacing.xs,
