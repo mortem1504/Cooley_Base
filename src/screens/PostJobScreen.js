@@ -16,8 +16,10 @@ import {
 import AppButton from '../components/AppButton';
 import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { useMainShell } from '../navigation/MainShellContext';
 import { requestListingCopilotSuggestions } from '../services/listingCopilotService';
 import { TAB_ROUTES } from '../navigation/routes';
 import { resolveAddressFromInput } from '../services/locationService';
@@ -225,6 +227,7 @@ export default function PostJobScreen({ navigation, route }) {
     updateOwnedListing,
     viewerLocation,
   } = useAppState();
+  const { openSidebar } = useMainShell();
   const topInset = useScreenTopInset(12);
   const [selectedType, setSelectedType] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -806,9 +809,7 @@ export default function PostJobScreen({ navigation, route }) {
     return (
       <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
         <View style={styles.headerRow}>
-          <Pressable onPress={goBack} style={styles.backButton}>
-            <Text style={styles.backButtonText}>{'<'}</Text>
-          </Pressable>
+          <SidebarMenuButton onPress={openSidebar} />
           <View style={styles.headerCopy}>
             <Text style={styles.headerTitle}>Create Post</Text>
             <Text style={styles.headerSubtitle}>What do you want to post?</Text>

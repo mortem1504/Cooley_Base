@@ -15,8 +15,10 @@ import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
 import BrowseJobCard from '../components/BrowseJobCard';
 import MapJobRow from '../components/MapJobRow';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { useMainShell } from '../navigation/MainShellContext';
 import { ROOT_ROUTES } from '../navigation/routes';
 import { buildMapRegion } from '../services/locationService';
 import { formatJobDistance, formatJobPrice } from '../utils/jobFormatters';
@@ -116,32 +118,6 @@ function SegmentedControl({ onChange, options, selectedValue }) {
   );
 }
 
-function SectionJumpRail({ activeKey, items, onPress, topOffset }) {
-  if (!items.length) {
-    return null;
-  }
-
-  return (
-    <View style={[styles.sectionJumpRail, { top: topOffset }]}>
-      {items.map((item) => {
-        const isActive = activeKey === item.key;
-
-        return (
-          <Pressable
-            key={item.key}
-            onPress={() => onPress(item.key)}
-            style={[styles.sectionJumpChip, isActive && styles.sectionJumpChipActive]}
-          >
-            <Text style={[styles.sectionJumpChipText, isActive && styles.sectionJumpChipTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 export default function DiscoverScreen({ navigation }) {
   const {
     currentUser,
@@ -161,11 +137,17 @@ export default function DiscoverScreen({ navigation }) {
     urgentNearbyListings,
     viewerLocation,
   } = useAppState();
+  const {
+    discoverSectionJumpRequest,
+    openSidebar,
+    setActiveDiscoverSectionKey,
+  } = useMainShell();
   const [selectedListingFilter, setSelectedListingFilter] = useState('all');
   const [selectedView, setSelectedView] = useState('list');
   const mapRef = useRef(null);
   const scrollRef = useRef(null);
   const sectionLocalOffsetsRef = useRef({});
+  const handledDiscoverJumpNonceRef = useRef(0);
   const topInset = useScreenTopInset(spacing.lg);
   const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
   const [bodyContentOffsetY, setBodyContentOffsetY] = useState(0);
@@ -217,7 +199,7 @@ export default function DiscoverScreen({ navigation }) {
     }));
   const pulseListingsSource = visibleUrgentListings.length ? visibleUrgentListings : visibleRecentListings;
   const pulseListings = pulseListingsSource.slice(0, 3);
-  const pulseSectionTitle = visibleUrgentListings.length ? 'Available now near you' : 'Fresh nearby picks';
+  const pulseSectionTitle = visibleUrgentListings.length ? 'Available now near you' : 'New nearby picks';
   const pulseSectionSubtitle = visibleUrgentListings.length
     ? 'Listings that need quicker attention around your area.'
     : 'Recently posted listings around you.';
@@ -235,24 +217,6 @@ export default function DiscoverScreen({ navigation }) {
   const locationSummaryText = viewerLocation?.address
     ? `Suggestions update around ${viewerLocation.address}.`
     : 'Turn on location to sharpen nearby suggestions and map ranking.';
-  const sectionRailItems = useMemo(() => {
-    const items = [{ key: 'suggested', label: 'For you' }];
-
-    if (closestRightNowListings.length) {
-      items.push({ key: 'closest', label: 'Closest' });
-    }
-
-    if (pulseListings.length) {
-      items.push({
-        key: 'pulse',
-        label: visibleUrgentListings.length ? 'Now' : 'Fresh',
-      });
-    }
-
-    items.push({ key: 'all', label: 'All' });
-    return items;
-  }, [closestRightNowListings.length, pulseListings.length, visibleUrgentListings.length]);
-  const sectionRailTopOffset = topInset + stickyHeaderHeight + spacing.md;
 
   useEffect(() => {
     if (!mapRef.current || selectedView !== 'map') {
@@ -270,13 +234,48 @@ export default function DiscoverScreen({ navigation }) {
     });
 
     setSectionOffsets(nextOffsets);
-  }, [bodyContentOffsetY, sectionRailItems]);
+  }, [bodyContentOffsetY]);
 
   useEffect(() => {
-    if (!sectionRailItems.some((item) => item.key === activeSectionKey)) {
-      setActiveSectionKey(sectionRailItems[0]?.key || 'suggested');
+    if (selectedView === 'list') {
+      setActiveDiscoverSectionKey(activeSectionKey);
+      return;
     }
-  }, [activeSectionKey, sectionRailItems]);
+
+    setActiveDiscoverSectionKey('map');
+  }, [activeSectionKey, selectedView, setActiveDiscoverSectionKey]);
+
+  useEffect(() => {
+    if (!discoverSectionJumpRequest?.nonce) {
+      return;
+    }
+
+    if (handledDiscoverJumpNonceRef.current === discoverSectionJumpRequest.nonce) {
+      return;
+    }
+
+    if (discoverSectionJumpRequest.key === 'map') {
+      handledDiscoverJumpNonceRef.current = discoverSectionJumpRequest.nonce;
+      if (selectedView !== 'map') {
+        setSelectedView('map');
+      }
+      return;
+    }
+
+    if (selectedView !== 'list') {
+      setSelectedView('list');
+      return;
+    }
+
+    const targetOffset = sectionOffsets[discoverSectionJumpRequest.key];
+
+    if (!Number.isFinite(targetOffset)) {
+      return;
+    }
+
+    handledDiscoverJumpNonceRef.current = discoverSectionJumpRequest.nonce;
+    handleJumpToSection(discoverSectionJumpRequest.key);
+  }, [discoverSectionJumpRequest, sectionOffsets, selectedView]);
 
   const handleSelectListingFilter = (nextFilter) => {
     if (nextFilter === selectedListingFilter) {
@@ -348,14 +347,15 @@ export default function DiscoverScreen({ navigation }) {
   };
 
   const handleScroll = ({ nativeEvent }) => {
+    const orderedSectionKeys = ['suggested', 'closest', 'pulse', 'all'];
     const markerOffset = nativeEvent.contentOffset.y + stickyHeaderHeight + spacing.lg;
-    let nextActiveKey = sectionRailItems[0]?.key || 'suggested';
+    let nextActiveKey = 'suggested';
 
-    sectionRailItems.forEach((item) => {
-      const targetOffset = sectionOffsets[item.key];
+    orderedSectionKeys.forEach((key) => {
+      const targetOffset = sectionOffsets[key];
 
       if (Number.isFinite(targetOffset) && markerOffset >= targetOffset) {
-        nextActiveKey = item.key;
+        nextActiveKey = key;
       }
     });
 
@@ -363,18 +363,20 @@ export default function DiscoverScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        onScroll={handleScroll}
-        ref={scrollRef}
-        scrollEventThrottle={16}
-        stickyHeaderIndices={[1]}
-        style={styles.container}
-      >
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      onScroll={handleScroll}
+      ref={scrollRef}
+      scrollEventThrottle={16}
+      stickyHeaderIndices={[1]}
+      style={styles.container}
+    >
         <View style={[styles.heroWrap, { paddingTop: topInset }]}>
           <AppCard style={styles.heroCard}>
-            <Text style={styles.greeting}>Hello, {firstName}</Text>
+            <View style={styles.heroTopRow}>
+              <SidebarMenuButton onPress={openSidebar} />
+              <Text style={styles.greeting}>Hello, {firstName}</Text>
+            </View>
             <AppTextInput
               onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
               placeholder="Search jobs, cameras, books, delivery, moving"
@@ -453,7 +455,7 @@ export default function DiscoverScreen({ navigation }) {
 
         <View
           onLayout={handleBodyContentLayout}
-          style={[styles.bodyContent, selectedView === 'list' && styles.bodyContentWithRail]}
+          style={styles.bodyContent}
         >
         <View style={styles.statRow}>
           <AppCard style={styles.statCard}>
@@ -733,25 +735,11 @@ export default function DiscoverScreen({ navigation }) {
           </>
         )}
         </View>
-      </ScrollView>
-
-      {selectedView === 'list' && stickyHeaderHeight > 0 && !isListingsLoading && !listingsNotice ? (
-        <SectionJumpRail
-          activeKey={activeSectionKey}
-          items={sectionRailItems}
-          onPress={handleJumpToSection}
-          topOffset={sectionRailTopOffset}
-        />
-      ) : null}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
   container: {
     backgroundColor: colors.background,
     flex: 1,
@@ -770,6 +758,12 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
+    flex: 1,
+  },
+  heroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   locationSummaryRow: {
     alignItems: 'center',
@@ -874,9 +868,6 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-  },
-  bodyContentWithRail: {
-    paddingRight: spacing.xxl + 44,
   },
   statRow: {
     flexDirection: 'row',
@@ -1019,40 +1010,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '800',
-  },
-  sectionJumpRail: {
-    alignItems: 'stretch',
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    borderColor: 'rgba(217, 226, 242, 0.98)',
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    gap: 8,
-    padding: 8,
-    position: 'absolute',
-    right: spacing.md,
-    width: 78,
-    ...shadow,
-  },
-  sectionJumpChip: {
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    minHeight: 42,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  sectionJumpChipActive: {
-    backgroundColor: colors.primary,
-  },
-  sectionJumpChipText: {
-    color: colors.secondaryText,
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  sectionJumpChipTextActive: {
-    color: colors.card,
   },
   messageCard: {
     gap: spacing.xs,

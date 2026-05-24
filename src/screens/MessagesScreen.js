@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import UserAvatar from '../components/UserAvatar';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { useMainShell } from '../navigation/MainShellContext';
 import { ROOT_ROUTES } from '../navigation/routes';
 import { formatThreadTimestamp } from '../utils/chatFormatters';
 import { colors, radius, spacing } from '../utils/theme';
@@ -65,6 +67,7 @@ function ThreadCard({ onOpenProfile, onPress, thread }) {
 
 export default function MessagesScreen({ navigation, route }) {
   const { isThreadsLoading, threads, threadsNotice, unreadThreadCount } = useAppState();
+  const { openSidebar } = useMainShell();
   const topInset = useScreenTopInset(spacing.lg);
   const [query, setQuery] = useState('');
   const handledOpenThreadNonceRef = useRef(null);
@@ -113,8 +116,13 @@ export default function MessagesScreen({ navigation, route }) {
   return (
     <ScrollView contentContainerStyle={[styles.content, { paddingTop: topInset }]} style={styles.container}>
       <AppCard style={styles.heroCard}>
-        <Text style={styles.eyebrow}>Messages</Text>
-        <Text style={styles.heading}>Keep every job and rental conversation in one place.</Text>
+        <View style={styles.heroTopRow}>
+          <SidebarMenuButton onPress={openSidebar} />
+          <View style={styles.heroTopCopy}>
+            <Text style={styles.eyebrow}>Messages</Text>
+            <Text style={styles.heading}>Keep every job and rental conversation in one place.</Text>
+          </View>
+        </View>
         <Text style={styles.subheading}>
           {unreadThreadCount
             ? `You have ${unreadThreadCount} unread conversation${unreadThreadCount > 1 ? 's' : ''}.`
@@ -196,6 +204,14 @@ const styles = StyleSheet.create({
   heroCard: {
     gap: spacing.sm,
     padding: spacing.lg,
+  },
+  heroTopRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  heroTopCopy: {
+    flex: 1,
   },
   eyebrow: {
     color: colors.primary,
