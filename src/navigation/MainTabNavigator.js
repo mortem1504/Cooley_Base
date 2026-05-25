@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SidebarMenuButton from '../components/SidebarMenuButton';
@@ -27,11 +28,11 @@ const EDGE_SWIPE_WIDTH = 18;
 const EDGE_SWIPE_TRIGGER_DX = 22;
 
 const MAIN_DRAWER_ITEMS = [
-  { key: TAB_ROUTES.DISCOVER, label: 'Discover' },
-  { key: TAB_ROUTES.POST_JOB, label: 'Post' },
-  { key: TAB_ROUTES.WALLET, label: 'Wallet' },
-  { key: TAB_ROUTES.MESSAGES, label: 'Messages' },
-  { key: TAB_ROUTES.PROFILE, label: 'Profile' },
+  { key: TAB_ROUTES.DISCOVER, label: 'Discover', iconActive: 'compass', iconInactive: 'compass-outline' },
+  { key: TAB_ROUTES.POST_JOB, label: 'Post', iconActive: 'add-circle', iconInactive: 'add-circle-outline' },
+  { key: TAB_ROUTES.WALLET, label: 'Wallet', iconActive: 'wallet', iconInactive: 'wallet-outline' },
+  { key: TAB_ROUTES.MESSAGES, label: 'Messages', iconActive: 'chatbubble-ellipses', iconInactive: 'chatbubble-ellipses-outline' },
+  { key: TAB_ROUTES.PROFILE, label: 'Profile', iconActive: 'person-circle', iconInactive: 'person-circle-outline' },
 ];
 
 function HiddenTabBarBridge({ onUpdate, ...props }) {
@@ -51,12 +52,19 @@ function resolveDeepestRouteName(route) {
   return resolveDeepestRouteName(nextRoute);
 }
 
-function DrawerItem({ active = false, badgeCount = 0, label, onPress }) {
+function DrawerItem({ active = false, badgeCount = 0, iconActive, iconInactive, label, onPress }) {
   const badgeLabel = badgeCount > 9 ? '9+' : `${badgeCount}`;
+  const iconName = active ? iconActive : iconInactive;
 
   return (
     <Pressable onPress={onPress} style={[styles.drawerItem, active && styles.drawerItemActive]}>
-      <View style={[styles.drawerItemDot, active && styles.drawerItemDotActive]} />
+      <View style={[styles.drawerItemIconWrap, active && styles.drawerItemIconWrapActive]}>
+        <Ionicons
+          color={active ? colors.card : 'rgba(255, 255, 255, 0.86)'}
+          name={iconName}
+          size={20}
+        />
+      </View>
       <Text style={[styles.drawerItemText, active && styles.drawerItemTextActive]}>{label}</Text>
       {badgeCount ? (
         <View style={styles.drawerBadge}>
@@ -270,6 +278,8 @@ export default function MainTabNavigator() {
               <DrawerItem
                 active={activeTabRouteName === item.key}
                 badgeCount={item.key === TAB_ROUTES.MESSAGES ? unreadThreadCount : 0}
+                iconActive={item.iconActive}
+                iconInactive={item.iconInactive}
                 key={item.key}
                 label={item.label}
                 onPress={() => handleNavigateMainRoute(item.key)}
@@ -384,15 +394,17 @@ const styles = StyleSheet.create({
   drawerItemActive: {
     backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
-  drawerItemDot: {
-    backgroundColor: 'rgba(255, 255, 255, 0.36)',
-    borderRadius: 999,
-    height: 8,
+  drawerItemIconWrap: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: radius.pill,
+    height: 32,
+    justifyContent: 'center',
     marginRight: 12,
-    width: 8,
+    width: 32,
   },
-  drawerItemDotActive: {
-    backgroundColor: colors.card,
+  drawerItemIconWrapActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
   drawerItemText: {
     color: 'rgba(255, 255, 255, 0.86)',
