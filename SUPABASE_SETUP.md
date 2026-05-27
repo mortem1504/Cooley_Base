@@ -47,6 +47,40 @@ After running the schema, verify these exist in the new project:
 - `rental_requests`
 - `rental_reviews`
 
+## AI Listing Copilot
+
+The current Listing Copilot calls a Supabase Edge Function at
+[supabase/functions/listing-copilot/index.ts](C:/Users/Acer%20Nitro/Cooley_Base/supabase/functions/listing-copilot/index.ts),
+and that function calls the Google Gemini API.
+
+To enable it:
+
+1. Create a Gemini API key in Google AI Studio.
+2. Store it as a Supabase secret:
+
+```bash
+npx supabase secrets set GEMINI_API_KEY=your_gemini_api_key
+```
+
+3. Optionally set a model override:
+
+```bash
+npx supabase secrets set GEMINI_MODEL=gemini-3.5-flash
+```
+
+4. Deploy or redeploy the function:
+
+```bash
+npx supabase functions deploy listing-copilot
+```
+
+Notes:
+
+- Keep the Gemini key server-side only. Do not place it in the Expo app.
+- The post screen still uses the same suggestion shape through
+  [src/services/listingCopilotService.js](C:/Users/Acer%20Nitro/Cooley_Base/src/services/listingCopilotService.js).
+- Gemini has a free tier, but free-tier limits depend on the model and project limits in Google AI Studio.
+
 ## Files Related To Supabase
 
 - [`.env.example`](C:/Users/PC/OneDrive/Documents/Cooley/.env.example)

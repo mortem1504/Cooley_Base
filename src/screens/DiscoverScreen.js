@@ -15,11 +15,13 @@ import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
 import BrowseJobCard from '../components/BrowseJobCard';
 import MapJobRow from '../components/MapJobRow';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { useMainShell } from '../navigation/MainShellContext';
 import { ROOT_ROUTES } from '../navigation/routes';
-import { buildMapRegion, isValidCoordinate } from '../services/locationService';
-import { formatJobPrice } from '../utils/jobFormatters';
+import { buildMapRegion } from '../services/locationService';
+import { formatJobDistance, formatJobPrice } from '../utils/jobFormatters';
 import { colors, radius, shadow, spacing } from '../utils/theme';
 
 const DEFAULT_MAX_DISTANCE_KM = 25;
@@ -36,15 +38,6 @@ const VIEW_OPTIONS = [
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-function matchesDiscoverSearch(listing, query) {
-  if (!query) {
-    return true;
-  }
-
-  const target = `${listing.title} ${listing.description} ${listing.category} ${listing.location}`.toLowerCase();
-  return target.includes(query.trim().toLowerCase());
 }
 
 function getListingGroup(listing) {
@@ -69,19 +62,38 @@ function isSellItemListing(listing) {
   );
 }
 
-function dedupeListings(collection) {
-  const seenKeys = new Set();
-
+function filterListingsByType(collection, selectedFilter) {
   return collection.filter((listing) => {
-    const nextKey = `${listing?.type || getListingGroup(listing)}:${listing?.id || ''}`;
-
-    if (!listing?.id || seenKeys.has(nextKey)) {
-      return false;
+    if (selectedFilter === 'job') {
+      return getListingGroup(listing) === 'job';
     }
 
-    seenKeys.add(nextKey);
+    if (selectedFilter === 'rental') {
+      return getListingGroup(listing) === 'item';
+    }
+
     return true;
   });
+}
+
+function buildClosestReasonChips(listing) {
+  const reasons = [];
+
+  if (Number.isFinite(Number(listing?.distance))) {
+    reasons.push(`${formatJobDistance(listing.distance)} away`);
+  }
+
+  if (listing?.urgent) {
+    reasons.push(
+      getListingGroup(listing) === 'item'
+        ? listing?.instantAccept
+          ? 'Available now'
+          : 'High demand nearby'
+        : 'Urgent nearby'
+    );
+  }
+
+  return reasons.slice(0, 2);
 }
 
 function SegmentedControl({ onChange, options, selectedValue }) {
@@ -111,56 +123,56 @@ export default function DiscoverScreen({ navigation }) {
     currentUser,
     filters,
     isListingsLoading,
-    pinnedListings,
     isLocationLoading,
-    jobs,
     listingsNotice,
     locationNotice,
-    preferredCurrency,
+    nearbyListings,
+    nearbyMapListings,
+    pinnedListings,
     refreshViewerLocation,
-    rentals,
     resetFilters,
     setFilters,
+    suggestedListings,
+    recentNearbyListings,
+    urgentNearbyListings,
     viewerLocation,
   } = useAppState();
+  const {
+    discoverSectionJumpRequest,
+    openSidebar,
+    setActiveDiscoverSectionKey,
+  } = useMainShell();
   const [selectedListingFilter, setSelectedListingFilter] = useState('all');
   const [selectedView, setSelectedView] = useState('list');
   const mapRef = useRef(null);
+  const scrollRef = useRef(null);
+  const sectionLocalOffsetsRef = useRef({});
+  const handledDiscoverJumpNonceRef = useRef(0);
   const topInset = useScreenTopInset(spacing.lg);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [bodyContentOffsetY, setBodyContentOffsetY] = useState(0);
+  const [sectionOffsets, setSectionOffsets] = useState({});
+  const [activeSectionKey, setActiveSectionKey] = useState('suggested');
   const firstName = currentUser.name?.trim()?.split(' ')[0] || 'there';
-  const allListings = useMemo(
-    () =>
-      dedupeListings([...jobs, ...rentals]).sort(
-        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
-      ),
-    [jobs, rentals]
-  );
   const visibleListings = useMemo(
-    () =>
-      allListings.filter((listing) => {
-        const matchesType =
-          selectedListingFilter === 'all' ||
-          (selectedListingFilter === 'job' && getListingGroup(listing) === 'job') ||
-          (selectedListingFilter === 'rental' && getListingGroup(listing) === 'item');
-        const listingDistance = Number.isFinite(Number(listing.distance))
-          ? Number(listing.distance)
-          : DEFAULT_MAX_DISTANCE_KM;
-
-        return (
-          matchesType &&
-          matchesDiscoverSearch(listing, filters.search) &&
-          listing.price <= filters.maxPrice &&
-          listingDistance <= filters.maxDistance
-        );
-      }),
-    [allListings, filters.maxDistance, filters.maxPrice, filters.search, selectedListingFilter, preferredCurrency]
+    () => filterListingsByType(nearbyListings, selectedListingFilter),
+    [nearbyListings, selectedListingFilter]
   );
   const mappableListings = useMemo(
-    () =>
-      visibleListings.filter(
-        (listing) => isValidCoordinate(listing.latitude) && isValidCoordinate(listing.longitude)
-      ),
-    [visibleListings]
+    () => filterListingsByType(nearbyMapListings, selectedListingFilter),
+    [nearbyMapListings, selectedListingFilter]
+  );
+  const visibleSuggestedListings = useMemo(
+    () => filterListingsByType(suggestedListings, selectedListingFilter),
+    [selectedListingFilter, suggestedListings]
+  );
+  const visibleRecentListings = useMemo(
+    () => filterListingsByType(recentNearbyListings, selectedListingFilter),
+    [recentNearbyListings, selectedListingFilter]
+  );
+  const visibleUrgentListings = useMemo(
+    () => filterListingsByType(urgentNearbyListings, selectedListingFilter),
+    [selectedListingFilter, urgentNearbyListings]
   );
   const mapRegion = useMemo(
     () =>
@@ -174,19 +186,23 @@ export default function DiscoverScreen({ navigation }) {
   const visibleItemCount = visibleListings.filter((listing) => getListingGroup(listing) === 'item').length;
   const visiblePinnedListings = useMemo(
     () =>
-      pinnedListings.filter((listing) => {
-        if (selectedListingFilter === 'job') {
-          return getListingGroup(listing) === 'job';
-        }
-
-        if (selectedListingFilter === 'rental') {
-          return getListingGroup(listing) === 'item';
-        }
-
-        return true;
-      }),
+      filterListingsByType(pinnedListings, selectedListingFilter),
     [pinnedListings, selectedListingFilter]
   );
+  const featuredSuggestedListings = visibleSuggestedListings.slice(0, 3);
+  const closestRightNowListings = visibleListings
+    .filter((listing) => ['posted', 'available'].includes(listing.status) || listing.dbStatus === 'open')
+    .slice(0, 3)
+    .map((listing) => ({
+      ...listing,
+      suggestionReasons: buildClosestReasonChips(listing),
+    }));
+  const pulseListingsSource = visibleUrgentListings.length ? visibleUrgentListings : visibleRecentListings;
+  const pulseListings = pulseListingsSource.slice(0, 3);
+  const pulseSectionTitle = visibleUrgentListings.length ? 'Available now near you' : 'New nearby picks';
+  const pulseSectionSubtitle = visibleUrgentListings.length
+    ? 'Listings that need quicker attention around your area.'
+    : 'Recently posted listings around you.';
   const hasActiveFilters =
     Boolean(filters.search) ||
     filters.maxPrice < DEFAULT_MAX_PRICE ||
@@ -198,6 +214,9 @@ export default function DiscoverScreen({ navigation }) {
       : selectedListingFilter === 'rental'
         ? 'Items'
         : 'All listings';
+  const locationSummaryText = viewerLocation?.address
+    ? `Suggestions update around ${viewerLocation.address}.`
+    : 'Turn on location to sharpen nearby suggestions and map ranking.';
 
   useEffect(() => {
     if (!mapRef.current || selectedView !== 'map') {
@@ -206,6 +225,57 @@ export default function DiscoverScreen({ navigation }) {
 
     mapRef.current.animateToRegion(mapRegion, 450);
   }, [mapRegion, selectedView]);
+
+  useEffect(() => {
+    const nextOffsets = {};
+
+    Object.entries(sectionLocalOffsetsRef.current).forEach(([key, localOffset]) => {
+      nextOffsets[key] = bodyContentOffsetY + localOffset;
+    });
+
+    setSectionOffsets(nextOffsets);
+  }, [bodyContentOffsetY]);
+
+  useEffect(() => {
+    if (selectedView === 'list') {
+      setActiveDiscoverSectionKey(activeSectionKey);
+      return;
+    }
+
+    setActiveDiscoverSectionKey('map');
+  }, [activeSectionKey, selectedView, setActiveDiscoverSectionKey]);
+
+  useEffect(() => {
+    if (!discoverSectionJumpRequest?.nonce) {
+      return;
+    }
+
+    if (handledDiscoverJumpNonceRef.current === discoverSectionJumpRequest.nonce) {
+      return;
+    }
+
+    if (discoverSectionJumpRequest.key === 'map') {
+      handledDiscoverJumpNonceRef.current = discoverSectionJumpRequest.nonce;
+      if (selectedView !== 'map') {
+        setSelectedView('map');
+      }
+      return;
+    }
+
+    if (selectedView !== 'list') {
+      setSelectedView('list');
+      return;
+    }
+
+    const targetOffset = sectionOffsets[discoverSectionJumpRequest.key];
+
+    if (!Number.isFinite(targetOffset)) {
+      return;
+    }
+
+    handledDiscoverJumpNonceRef.current = discoverSectionJumpRequest.nonce;
+    handleJumpToSection(discoverSectionJumpRequest.key);
+  }, [discoverSectionJumpRequest, sectionOffsets, selectedView]);
 
   const handleSelectListingFilter = (nextFilter) => {
     if (nextFilter === selectedListingFilter) {
@@ -245,72 +315,148 @@ export default function DiscoverScreen({ navigation }) {
     }
   };
 
+  const handleBodyContentLayout = ({ nativeEvent }) => {
+    const nextY = nativeEvent.layout.y;
+    setBodyContentOffsetY((prev) => (prev === nextY ? prev : nextY));
+  };
+
+  const handleSectionLayout = (key, localOffset) => {
+    sectionLocalOffsetsRef.current[key] = localOffset;
+    const nextAbsoluteOffset = bodyContentOffsetY + localOffset;
+
+    setSectionOffsets((prev) => (
+      prev[key] === nextAbsoluteOffset
+        ? prev
+        : {
+            ...prev,
+            [key]: nextAbsoluteOffset,
+          }
+    ));
+  };
+
+  const handleJumpToSection = (key) => {
+    const targetOffset = sectionOffsets[key];
+
+    if (!Number.isFinite(targetOffset)) {
+      return;
+    }
+
+    const scrollTarget = Math.max(0, targetOffset - stickyHeaderHeight - spacing.md);
+    scrollRef.current?.scrollTo({ animated: true, y: scrollTarget });
+    setActiveSectionKey(key);
+  };
+
+  const handleScroll = ({ nativeEvent }) => {
+    const orderedSectionKeys = ['suggested', 'closest', 'pulse', 'all'];
+    const markerOffset = nativeEvent.contentOffset.y + stickyHeaderHeight + spacing.lg;
+    let nextActiveKey = 'suggested';
+
+    orderedSectionKeys.forEach((key) => {
+      const targetOffset = sectionOffsets[key];
+
+      if (Number.isFinite(targetOffset) && markerOffset >= targetOffset) {
+        nextActiveKey = key;
+      }
+    });
+
+    setActiveSectionKey((prev) => (prev === nextActiveKey ? prev : nextActiveKey));
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[1]} style={styles.container}>
-      <View style={[styles.heroWrap, { paddingTop: topInset }]}>
-        <AppCard style={styles.heroCard}>
-          <Text style={styles.greeting}>Hello, {firstName}</Text>
-          <AppTextInput
-            onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
-            placeholder="Search jobs, cameras, books, delivery, moving"
-            value={filters.search}
-          />
-        </AppCard>
-      </View>
-
-      <View style={styles.stickyHeader}>
-        <View style={styles.controlGroup}>
-          <Text style={styles.controlLabel}>Category</Text>
-          <SegmentedControl
-            onChange={handleSelectListingFilter}
-            options={LISTING_FILTER_OPTIONS}
-            selectedValue={selectedListingFilter}
-          />
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      onScroll={handleScroll}
+      ref={scrollRef}
+      scrollEventThrottle={16}
+      stickyHeaderIndices={[1]}
+      style={styles.container}
+    >
+        <View style={[styles.heroWrap, { paddingTop: topInset }]}>
+          <AppCard style={styles.heroCard}>
+            <View style={styles.heroTopRow}>
+              <SidebarMenuButton onPress={openSidebar} />
+              <Text style={styles.greeting}>Hello, {firstName}</Text>
+            </View>
+            <AppTextInput
+              onChangeText={(value) => setFilters((prev) => ({ ...prev, search: value }))}
+              placeholder="Search jobs, cameras, books, delivery, moving"
+              value={filters.search}
+            />
+            <View style={styles.locationSummaryRow}>
+              <View style={styles.locationSummaryChip}>
+                <Text style={styles.locationSummaryChipText}>
+                  {viewerLocation ? 'Nearby mode on' : 'Location recommended'}
+                </Text>
+              </View>
+              <Pressable onPress={handleRecenter}>
+                <Text style={styles.locationSummaryAction}>
+                  {isLocationLoading ? 'Refreshing...' : viewerLocation ? 'Refresh nearby' : 'Use my location'}
+                </Text>
+              </Pressable>
+            </View>
+            <Text style={styles.locationSummaryText}>{locationSummaryText}</Text>
+          </AppCard>
         </View>
 
-        <View style={styles.controlGroup}>
-          <Text style={styles.controlLabel}>View</Text>
-          <SegmentedControl
-            onChange={handleSelectView}
-            options={VIEW_OPTIONS}
-            selectedValue={selectedView}
-          />
+        <View
+          onLayout={({ nativeEvent }) => setStickyHeaderHeight(nativeEvent.layout.height)}
+          style={styles.stickyHeader}
+        >
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>Category</Text>
+            <SegmentedControl
+              onChange={handleSelectListingFilter}
+              options={LISTING_FILTER_OPTIONS}
+              selectedValue={selectedListingFilter}
+            />
+          </View>
+
+          <View style={styles.controlGroup}>
+            <Text style={styles.controlLabel}>View</Text>
+            <SegmentedControl
+              onChange={handleSelectView}
+              options={VIEW_OPTIONS}
+              selectedValue={selectedView}
+            />
+          </View>
+
+          <View style={styles.quickFilterRow}>
+            <Pressable
+              onPress={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxPrice: prev.maxPrice === DEFAULT_MAX_PRICE ? 100 : DEFAULT_MAX_PRICE,
+                }))
+              }
+              style={styles.quickFilterPressable}
+            >
+              <AppCard style={styles.quickFilterCard}>
+                <Text style={styles.quickFilterLabel}>Price</Text>
+                <Text style={styles.quickFilterValue}>Up to ${filters.maxPrice}</Text>
+              </AppCard>
+            </Pressable>
+
+            <Pressable
+              onPress={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxDistance: prev.maxDistance === DEFAULT_MAX_DISTANCE_KM ? 5 : DEFAULT_MAX_DISTANCE_KM,
+                }))
+              }
+              style={styles.quickFilterPressable}
+            >
+              <AppCard style={styles.quickFilterCard}>
+                <Text style={styles.quickFilterLabel}>Distance</Text>
+                <Text style={styles.quickFilterValue}>{filters.maxDistance} km</Text>
+              </AppCard>
+            </Pressable>
+          </View>
         </View>
 
-        <View style={styles.quickFilterRow}>
-          <Pressable
-            onPress={() =>
-              setFilters((prev) => ({
-                ...prev,
-                maxPrice: prev.maxPrice === DEFAULT_MAX_PRICE ? 100 : DEFAULT_MAX_PRICE,
-              }))
-            }
-            style={styles.quickFilterPressable}
-          >
-            <AppCard style={styles.quickFilterCard}>
-              <Text style={styles.quickFilterLabel}>Price</Text>
-              <Text style={styles.quickFilterValue}>Up to ${filters.maxPrice}</Text>
-            </AppCard>
-          </Pressable>
-
-          <Pressable
-            onPress={() =>
-              setFilters((prev) => ({
-                ...prev,
-                maxDistance: prev.maxDistance === DEFAULT_MAX_DISTANCE_KM ? 5 : DEFAULT_MAX_DISTANCE_KM,
-              }))
-            }
-            style={styles.quickFilterPressable}
-          >
-            <AppCard style={styles.quickFilterCard}>
-              <Text style={styles.quickFilterLabel}>Distance</Text>
-              <Text style={styles.quickFilterValue}>{filters.maxDistance} km</Text>
-            </AppCard>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.bodyContent}>
+        <View
+          onLayout={handleBodyContentLayout}
+          style={styles.bodyContent}
+        >
         <View style={styles.statRow}>
           <AppCard style={styles.statCard}>
             <Text style={styles.statValue}>{visibleListings.length}</Text>
@@ -338,47 +484,134 @@ export default function DiscoverScreen({ navigation }) {
           </AppCard>
         ) : selectedView === 'list' ? (
           <>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionCopy}>
-                <Text style={styles.sectionTitle}>{activeListingLabel} near you</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Showing {visibleListings.length} result{visibleListings.length === 1 ? '' : 's'} in
-                  card view.
+            <View onLayout={({ nativeEvent }) => handleSectionLayout('suggested', nativeEvent.layout.y)}>
+              <AppCard style={styles.suggestionIntroCard}>
+                <Text style={styles.suggestionIntroTitle}>Why these listings are suggested</Text>
+                <Text style={styles.messageText}>
+                  We rank nearby jobs and items using distance, freshness, urgency, and what you
+                  search for.
                 </Text>
+              </AppCard>
+
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionCopy}>
+                  <Text style={styles.sectionTitle}>Suggested for you</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Clear picks based on what is close, active, and relevant right now.
+                  </Text>
+                </View>
               </View>
-              {hasActiveFilters ? (
-                <Pressable onPress={handleResetDiscoverFilters}>
-                  <Text style={styles.linkText}>Reset</Text>
-                </Pressable>
-              ) : null}
+
+              {featuredSuggestedListings.length ? (
+                featuredSuggestedListings.map((listing) => (
+                  <BrowseJobCard
+                    job={listing}
+                    key={`suggested-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                    reasonChips={listing.suggestionReasons}
+                  />
+                ))
+              ) : (
+                <AppCard style={styles.messageCard}>
+                  <Text style={styles.messageTitle}>Suggestions will appear here</Text>
+                  <Text style={styles.messageText}>
+                    {viewerLocation
+                      ? 'As more open listings are posted nearby, we will highlight the best matches first.'
+                      : 'Enable location and we will surface the best nearby jobs and items first.'}
+                  </Text>
+                </AppCard>
+              )}
             </View>
 
-            {visibleListings.length ? (
-              visibleListings.map((listing) => (
-                <BrowseJobCard
-                  job={listing}
-                  key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
-                  onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
-                />
-              ))
-            ) : (
-              <AppCard style={styles.messageCard}>
-                <Text style={styles.messageTitle}>No listings match right now</Text>
-                <Text style={styles.messageText}>
-                  {hasActiveFilters
-                    ? 'Try widening the price or distance filters, or switch back to All.'
-                    : 'New campus jobs and item listings will show up here automatically.'}
-                </Text>
+            {closestRightNowListings.length ? (
+              <View onLayout={({ nativeEvent }) => handleSectionLayout('closest', nativeEvent.layout.y)}>
+                <AppCard style={styles.mapListCard}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionCopy}>
+                      <Text style={styles.sectionTitle}>Closest right now</Text>
+                      <Text style={styles.sectionSubtitle}>
+                        The quickest listings to act on within your current distance filter.
+                      </Text>
+                    </View>
+                  </View>
+
+                  {closestRightNowListings.map((listing) => (
+                    <MapJobRow
+                      job={listing}
+                      key={`closest-${listing.id}`}
+                      onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                      reasonChips={listing.suggestionReasons}
+                    />
+                  ))}
+                </AppCard>
+              </View>
+            ) : null}
+
+            {pulseListings.length ? (
+              <View onLayout={({ nativeEvent }) => handleSectionLayout('pulse', nativeEvent.layout.y)}>
+                <AppCard style={styles.mapListCard}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionCopy}>
+                      <Text style={styles.sectionTitle}>{pulseSectionTitle}</Text>
+                      <Text style={styles.sectionSubtitle}>{pulseSectionSubtitle}</Text>
+                    </View>
+                  </View>
+
+                  {pulseListings.map((listing) => (
+                    <MapJobRow
+                      job={listing}
+                      key={`pulse-${listing.id}`}
+                      onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                      reasonChips={listing.suggestionReasons}
+                    />
+                  ))}
+                </AppCard>
+              </View>
+            ) : null}
+
+            <View onLayout={({ nativeEvent }) => handleSectionLayout('all', nativeEvent.layout.y)}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionCopy}>
+                  <Text style={styles.sectionTitle}>{activeListingLabel} near you</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Showing {visibleListings.length} result{visibleListings.length === 1 ? '' : 's'} in
+                    card view.
+                  </Text>
+                </View>
                 {hasActiveFilters ? (
-                  <AppButton
-                    label="Reset filters"
-                    onPress={handleResetDiscoverFilters}
-                    style={styles.resetButton}
-                    variant="secondary"
-                  />
+                  <Pressable onPress={handleResetDiscoverFilters}>
+                    <Text style={styles.linkText}>Reset</Text>
+                  </Pressable>
                 ) : null}
-              </AppCard>
-            )}
+              </View>
+
+              {visibleListings.length ? (
+                visibleListings.map((listing) => (
+                  <BrowseJobCard
+                    job={listing}
+                    key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                  />
+                ))
+              ) : (
+                <AppCard style={styles.messageCard}>
+                  <Text style={styles.messageTitle}>No listings match right now</Text>
+                  <Text style={styles.messageText}>
+                    {hasActiveFilters
+                      ? 'Try widening the price or distance filters, or switch back to All.'
+                      : 'New campus jobs and item listings will show up here automatically.'}
+                  </Text>
+                  {hasActiveFilters ? (
+                    <AppButton
+                      label="Reset filters"
+                      onPress={handleResetDiscoverFilters}
+                      style={styles.resetButton}
+                      variant="secondary"
+                    />
+                  ) : null}
+                </AppCard>
+              )}
+            </View>
           </>
         ) : (
           <>
@@ -387,7 +620,7 @@ export default function DiscoverScreen({ navigation }) {
                 <View style={styles.sectionCopy}>
                   <Text style={styles.sectionTitle}>{activeListingLabel} on the map</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Filtered pins update automatically as you switch tabs above.
+                    Pins update from the same nearby suggestion system used in list view.
                   </Text>
                 </View>
                 <Pressable onPress={handleRecenter} style={styles.recenterChip}>
@@ -451,9 +684,9 @@ export default function DiscoverScreen({ navigation }) {
             <AppCard style={styles.mapListCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionCopy}>
-                  <Text style={styles.sectionTitle}>Pinned listings</Text>
+                  <Text style={styles.sectionTitle}>Suggested on this map</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Listings you saved for quick access later.
+                    We explain each pick so users know why it appears here.
                   </Text>
                 </View>
                 {hasActiveFilters ? (
@@ -463,23 +696,45 @@ export default function DiscoverScreen({ navigation }) {
                 ) : null}
               </View>
 
-              {visiblePinnedListings.length ? (
-                visiblePinnedListings.map((listing) => (
+              {featuredSuggestedListings.length ? (
+                featuredSuggestedListings.map((listing) => (
                   <MapJobRow
                     job={listing}
-                    key={`${listing.type || getListingGroup(listing)}-${listing.id}`}
+                    key={`map-suggested-${listing.id}`}
                     onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                    reasonChips={listing.suggestionReasons}
                   />
                 ))
               ) : (
                 <Text style={styles.messageText}>
-                  Pin a listing from its detail screen and it will show up here.
+                  Move around the map or widen your distance filter to see more nearby suggestions.
                 </Text>
               )}
             </AppCard>
+
+            {visiblePinnedListings.length ? (
+              <AppCard style={styles.mapListCard}>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionCopy}>
+                    <Text style={styles.sectionTitle}>Pinned listings</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Listings you saved for quick access later.
+                    </Text>
+                  </View>
+                </View>
+
+                {visiblePinnedListings.map((listing) => (
+                  <MapJobRow
+                    job={listing}
+                    key={`pinned-${listing.id}`}
+                    onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: listing.id })}
+                  />
+                ))}
+              </AppCard>
+            ) : null}
           </>
         )}
-      </View>
+        </View>
     </ScrollView>
   );
 }
@@ -503,6 +758,39 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
+    flex: 1,
+  },
+  heroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  locationSummaryRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  locationSummaryChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  locationSummaryChipText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  locationSummaryAction: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  locationSummaryText: {
+    color: colors.secondaryText,
+    fontSize: 13,
+    lineHeight: 19,
   },
   stickyHeader: {
     backgroundColor: colors.background,
@@ -713,6 +1001,15 @@ const styles = StyleSheet.create({
   mapListCard: {
     gap: spacing.md,
     padding: spacing.lg,
+  },
+  suggestionIntroCard: {
+    gap: spacing.xs,
+    padding: spacing.lg,
+  },
+  suggestionIntroTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
   },
   messageCard: {
     gap: spacing.xs,

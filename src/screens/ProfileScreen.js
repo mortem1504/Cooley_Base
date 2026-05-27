@@ -5,9 +5,11 @@ import AppButton from '../components/AppButton';
 import AppCard from '../components/AppCard';
 import AppTextInput from '../components/AppTextInput';
 import BadgePill from '../components/BadgePill';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import UserAvatar from '../components/UserAvatar';
 import useAppState from '../hooks/useAppState';
 import useScreenTopInset from '../hooks/useScreenTopInset';
+import { useMainShell } from '../navigation/MainShellContext';
 import { ROOT_ROUTES, TAB_ROUTES } from '../navigation/routes';
 import { fetchProfileById } from '../services/authService';
 import {
@@ -318,6 +320,7 @@ export default function ProfileScreen({ navigation, route }) {
     rentals,
     updateCurrentUserProfile,
   } = useAppState();
+  const { isShellAvailable, openSidebar } = useMainShell();
   const topInset = useScreenTopInset(spacing.lg);
   const routeUserId = route?.params?.userId || currentUser.id;
   const isOwnProfile = !route?.params?.userId || routeUserId === currentUser.id;
@@ -663,9 +666,12 @@ export default function ProfileScreen({ navigation, route }) {
       style={styles.container}
     >
       <View style={styles.heroSection}>
-        <View style={styles.greetingBlock}>
-          <Text style={styles.greetingTitle}>Hello, {greetingName}</Text>
-          <Text style={styles.greetingDate}>{greetingDate}</Text>
+        <View style={styles.heroTopRow}>
+          {isShellAvailable ? <SidebarMenuButton onPress={openSidebar} /> : null}
+          <View style={styles.greetingBlock}>
+            <Text style={styles.greetingTitle}>Hello, {greetingName}</Text>
+            <Text style={styles.greetingDate}>{greetingDate}</Text>
+          </View>
         </View>
 
         <StudentIdCard
@@ -1011,7 +1017,13 @@ const styles = StyleSheet.create({
   heroSection: {
     gap: spacing.lg,
   },
+  heroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
   greetingBlock: {
+    flex: 1,
     gap: spacing.xs,
     paddingHorizontal: spacing.xs,
   },

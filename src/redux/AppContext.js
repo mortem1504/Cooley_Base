@@ -74,11 +74,15 @@ import {
   savePinnedListingIds,
 } from '../services/pinnedListingsService';
 import { getSupabaseClient } from '../services/supabaseClient';
+import { formatJobDistance } from '../utils/jobFormatters';
 
 const AppContext = createContext(null);
 const DEFAULT_MAX_DISTANCE_KM = 25;
 const DEFAULT_MAX_PRICE = 500;
 const AUTH_HYDRATION_TIMEOUT_MS = 8000;
+const RECENT_LISTING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const FRESH_LISTING_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const MAX_SUGGESTED_LISTINGS = 12;
 
 function buildDefaultFilters() {
   return {
@@ -96,6 +100,94 @@ function matchesSearch(job, query) {
 
   const target = `${job.title} ${job.description} ${job.category} ${job.location}`.toLowerCase();
   return target.includes(query.trim().toLowerCase());
+}
+
+function getListingGroup(listing) {
+  if (listing?.type === 'rental') {
+    return 'item';
+  }
+
+  if (listing?.type === 'job') {
+    return 'job';
+  }
+
+  if (listing?.listingMode === 'rent' || listing?.listingMode === 'sell') {
+    return 'item';
+  }
+
+  return 'job';
+}
+
+function getListingDistanceValue(listing, fallback = DEFAULT_MAX_DISTANCE_KM) {
+  return Number.isFinite(Number(listing?.distance)) ? Number(listing.distance) : fallback;
+}
+
+function isListingOpenForDiscovery(listing) {
+  return listing?.dbStatus === 'open' || ['posted', 'available'].includes(listing?.status);
+}
+
+function wasCreatedWithin(createdAt, durationMs) {
+  if (!createdAt) {
+    return false;
+  }
+
+  return Date.now() - Number(createdAt) <= durationMs;
+}
+
+function buildSuggestionReasons(listing, filters) {
+  const reasons = [];
+  const distanceValue = getListingDistanceValue(listing, null);
+
+  if (distanceValue !== null) {
+    reasons.push(`${formatJobDistance(distanceValue)} away`);
+  }
+
+  if (filters.search && matchesSearch(listing, filters.search)) {
+    reasons.push(`Matches "${filters.search.trim()}"`);
+  }
+
+  if (listing.urgent) {
+    reasons.push(
+      getListingGroup(listing) === 'item'
+        ? listing.instantAccept
+          ? 'Available now'
+          : 'High demand nearby'
+        : 'Urgent nearby'
+    );
+  }
+
+  if (wasCreatedWithin(listing.createdAt, RECENT_LISTING_WINDOW_MS)) {
+    reasons.push('New today');
+  } else if (wasCreatedWithin(listing.createdAt, FRESH_LISTING_WINDOW_MS)) {
+    reasons.push('Posted recently');
+  }
+
+  return reasons.filter(Boolean).slice(0, 2);
+}
+
+function buildSuggestionScore(listing, filters) {
+  const distanceValue = getListingDistanceValue(listing, DEFAULT_MAX_DISTANCE_KM);
+  const distanceScore = Math.max(0, 48 - distanceValue * 5);
+  const freshnessScore = wasCreatedWithin(listing.createdAt, RECENT_LISTING_WINDOW_MS)
+    ? 18
+    : wasCreatedWithin(listing.createdAt, FRESH_LISTING_WINDOW_MS)
+      ? 10
+      : 0;
+  const urgencyScore = listing.urgent ? 12 : 0;
+  const searchScore =
+    filters.search && matchesSearch(listing, filters.search)
+      ? 16
+      : 0;
+
+  return distanceScore + freshnessScore + urgencyScore + searchScore;
+}
+
+function enrichSuggestedListing(listing, filters) {
+  return {
+    ...listing,
+    suggestionReasons: buildSuggestionReasons(listing, filters),
+    suggestionScore: buildSuggestionScore(listing, filters),
+  };
 }
 
 function upsertById(collection, nextItem) {
@@ -214,11 +306,11 @@ export function AppProvider({ children }) {
   const [isMessagesLoadingByThread, setIsMessagesLoadingByThread] = useState({});
   const [threadsNotice, setThreadsNotice] = useState('');
   const [messageNoticeByThread, setMessageNoticeByThread] = useState({});
-      setWallet(null);
-      setWalletTransactions([]);
-      setWalletNotice('');
-      setIsWalletLoading(false);
-      setPinnedListingIds([]);
+  const [wallet, setWallet] = useState(null);
+  const [walletTransactions, setWalletTransactions] = useState([]);
+  const [walletNotice, setWalletNotice] = useState('');
+  const [isWalletLoading, setIsWalletLoading] = useState(false);
+  const [preferredCurrency, setPreferredCurrency] = useState(getAppCurrency());
   const [pinnedListingIds, setPinnedListingIds] = useState([]);
   const [filters, setFilters] = useState(buildDefaultFilters);
   const ownerApplicationsCacheRef = useRef({});
@@ -296,6 +388,84 @@ export function AppProvider({ children }) {
       ),
     [jobsWithViewerState, rentalsWithViewerState]
   );
+  const nearbyListings = useMemo(
+    () =>
+      allListings
+        .filter(
+          (listing) =>
+            matchesSearch(listing, filters.search) &&
+            listing.price <= filters.maxPrice &&
+            getListingDistanceValue(listing) <= filters.maxDistance
+        )
+        .sort((first, second) => {
+          const distanceDelta = getListingDistanceValue(first) - getListingDistanceValue(second);
+
+          if (distanceDelta !== 0) {
+            return distanceDelta;
+          }
+
+          return (second.createdAt || 0) - (first.createdAt || 0);
+        }),
+    [allListings, filters.maxDistance, filters.maxPrice, filters.search]
+  );
+  const nearbyMapListings = useMemo(
+    () =>
+      nearbyListings.filter(
+        (listing) => isValidCoordinate(listing.latitude) && isValidCoordinate(listing.longitude)
+      ),
+    [nearbyListings]
+  );
+  const suggestedListings = useMemo(
+    () =>
+      nearbyListings
+        .filter((listing) => isListingOpenForDiscovery(listing) && !listing.hasApplied)
+        .map((listing) => enrichSuggestedListing(listing, filters))
+        .sort((first, second) => {
+          if (second.suggestionScore !== first.suggestionScore) {
+            return second.suggestionScore - first.suggestionScore;
+          }
+
+          const distanceDelta = getListingDistanceValue(first) - getListingDistanceValue(second);
+
+          if (distanceDelta !== 0) {
+            return distanceDelta;
+          }
+
+          return (second.createdAt || 0) - (first.createdAt || 0);
+        })
+        .slice(0, MAX_SUGGESTED_LISTINGS),
+    [filters, nearbyListings]
+  );
+  const urgentNearbyListings = useMemo(
+    () =>
+      nearbyListings
+        .filter((listing) => isListingOpenForDiscovery(listing) && listing.urgent)
+        .map((listing) => enrichSuggestedListing(listing, filters))
+        .sort((first, second) => {
+          const distanceDelta = getListingDistanceValue(first) - getListingDistanceValue(second);
+
+          if (distanceDelta !== 0) {
+            return distanceDelta;
+          }
+
+          return (second.createdAt || 0) - (first.createdAt || 0);
+        })
+        .slice(0, MAX_SUGGESTED_LISTINGS),
+    [filters, nearbyListings]
+  );
+  const recentNearbyListings = useMemo(
+    () =>
+      nearbyListings
+        .filter(
+          (listing) =>
+            isListingOpenForDiscovery(listing) &&
+            wasCreatedWithin(listing.createdAt, FRESH_LISTING_WINDOW_MS)
+        )
+        .map((listing) => enrichSuggestedListing(listing, filters))
+        .sort((first, second) => (second.createdAt || 0) - (first.createdAt || 0))
+        .slice(0, MAX_SUGGESTED_LISTINGS),
+    [filters, nearbyListings]
+  );
   const pinnedListings = useMemo(
     () =>
       pinnedListingIds
@@ -353,22 +523,6 @@ export function AppProvider({ children }) {
 
     return [...postedJobs, ...postedRentals].sort((first, second) => second.createdAt - first.createdAt);
   }, [currentUser.id, jobs, rentals]);
-
-  const allListings = useMemo(
-    () =>
-      dedupeById([...jobsWithViewerState, ...rentalsWithViewerState]).sort(
-        (first, second) => (second.createdAt || 0) - (first.createdAt || 0)
-      ),
-    [jobsWithViewerState, rentalsWithViewerState]
-  );
-
-  const pinnedListings = useMemo(
-    () =>
-      pinnedListingIds
-        .map((listingId) => allListings.find((listing) => listing.id === listingId))
-        .filter(Boolean),
-    [allListings, pinnedListingIds]
-  );
 
   useEffect(() => {
     ownerApplicationsCacheRef.current = ownerApplicationsByListing;
@@ -1057,15 +1211,10 @@ export function AppProvider({ children }) {
       setIsMessagesLoadingByThread({});
       setIsThreadsLoading(false);
       setThreadsNotice('');
-     setIsThreadsLoading(false);
-      setThreadsNotice('');
       setWallet(null);
       setWalletTransactions([]);
       setWalletNotice('');
       setIsWalletLoading(false);
-      setPinnedListingIds([]);
-      setAuthNotice('');
-      return { ok: true };
       setPinnedListingIds([]);
       setAuthNotice('');
       return { ok: true };
@@ -1468,18 +1617,6 @@ export function AppProvider({ children }) {
     }
   };
 
-  const cancelRentalBooking = async (requestId) => {
-    try {
-      const result = await cancelRentalBookingRecord(requestId);
-      const thread = await refreshMarketplaceAndThreadState(result.threadId);
-      setListingsNotice('');
-      return { ...result, thread };
-    } catch (error) {
-      setListingsNotice(error.message);
-      throw error;
-    }
-  };
-
   const updateRentalBookingStage = async (requestId, nextStatus) => {
     try {
       const result = await advanceRentalBookingStage(requestId, nextStatus);
@@ -1770,6 +1907,7 @@ export function AppProvider({ children }) {
       value={{
         authMode,
         authNotice,
+        allListings,
         applicationsNotice,
         cancelJob,
         cancelJobApplication,
@@ -1805,11 +1943,14 @@ export function AppProvider({ children }) {
         locationNotice,
         markThreadRead,
         myListings,
+        nearbyListings,
+        nearbyMapListings,
         openJobChat,
         openApplicationChat,
         pinnedListings,
         postJob,
         postRental,
+        recentNearbyListings,
         requestRentalBooking,
         refreshViewerLocation,
         rentals: rentalsWithViewerState,
@@ -1843,6 +1984,8 @@ export function AppProvider({ children }) {
         payForJobFromWallet,
         releaseJobPaymentFromWallet,
         preferredCurrency,
+        suggestedListings,
+        urgentNearbyListings,
         changePreferredCurrency,
         currencyList: CURRENCY_LIST,
       }}

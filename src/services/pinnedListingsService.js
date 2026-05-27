@@ -1,7 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 function buildPinnedListingsStorageKey(userId) {
   return `cooley:pinned-listings:${userId || 'guest'}`;
 }
@@ -25,5 +23,4 @@ export async function loadPinnedListingIds(userId) {
 export async function savePinnedListingIds(userId, listingIds) {
   const storageKey = buildPinnedListingsStorageKey(userId);
   await AsyncStorage.setItem(storageKey, JSON.stringify(listingIds));
-}
 }

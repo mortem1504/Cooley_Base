@@ -10,7 +10,7 @@ import AppCard from './AppCard';
 import JobStatusBadge from './JobStatusBadge';
 import PriceDisplay from './PriceDisplay';
 
-export default function BrowseJobCard({ job, onPress }) {
+export default function BrowseJobCard({ job, onPress, reasonChips = [] }) {
   const badgeVariant = getListingBadgeVariant(job);
 
   return (
@@ -50,6 +50,15 @@ export default function BrowseJobCard({ job, onPress }) {
           />
         </View>
         <Text style={styles.meta}>{formatJobSummaryMeta(job)}</Text>
+        {reasonChips.length ? (
+          <View style={styles.reasonChipsRow}>
+            {reasonChips.map((reason) => (
+              <View key={`${job.id}-${reason}`} style={styles.reasonChip}>
+                <Text style={styles.reasonChipText}>{reason}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         <Text numberOfLines={2} style={styles.description}>
           {job.description}
         </Text>
@@ -124,6 +133,22 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.secondaryText,
     fontSize: 13,
+  },
+  reasonChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  reasonChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  reasonChipText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
   },
   description: {
     color: colors.secondaryText,

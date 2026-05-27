@@ -1,11 +1,13 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import SidebarMenuButton from '../components/SidebarMenuButton';
 import TopUpScreen from '../screens/TopUpScreen';
 import TransactionHistoryScreen from '../screens/TransactionHistoryScreen';
 import WalletScreen from '../screens/WalletScreen';
 import WithdrawScreen from '../screens/WithdrawScreen';
 import { colors } from '../utils/theme';
+import { useMainShell } from './MainShellContext';
 import { WALLET_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -18,12 +20,17 @@ const screenOptions = {
 };
 
 export default function WalletNavigator() {
+  const { openSidebar } = useMainShell();
+
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
         component={WalletScreen}
         name={WALLET_ROUTES.HOME}
-        options={{ title: 'Wallet' }}
+        options={{
+          title: 'Wallet',
+          headerLeft: () => <SidebarMenuButton onPress={openSidebar} />,
+        }}
       />
       <Stack.Screen
         component={TopUpScreen}

@@ -6,31 +6,49 @@ import AppCard from '../components/AppCard';
 import MapJobRow from '../components/MapJobRow';
 import useAppState from '../hooks/useAppState';
 import { DISCOVER_ROUTES, ROOT_ROUTES } from '../navigation/routes';
-import { buildMapRegion, isValidCoordinate } from '../services/locationService';
+import { buildMapRegion } from '../services/locationService';
 import { colors, radius, spacing } from '../utils/theme';
 import { formatJobPrice } from '../utils/jobFormatters';
 
+function getListingGroup(listing) {
+  if (listing?.type === 'rental') {
+    return 'item';
+  }
+
+  if (listing?.type === 'job') {
+    return 'job';
+  }
+
+  if (listing?.listingMode === 'rent' || listing?.listingMode === 'sell') {
+    return 'item';
+  }
+
+  return 'job';
+}
+
+function isSellItemListing(listing) {
+  return getListingGroup(listing) === 'item' && (
+    listing?.listingMode === 'sell' || Boolean(listing?.instantAccept)
+  );
+}
+
 export default function MapBrowseScreen({ navigation }) {
   const {
-    filteredJobs,
     filters,
     isListingsLoading,
     isLocationLoading,
     listingsNotice,
     locationNotice,
+    nearbyMapListings,
     resetFilters,
     refreshViewerLocation,
     setFilters,
+    suggestedListings,
     viewerLocation,
   } = useAppState();
   const mapRef = useRef(null);
-  const mappableJobs = useMemo(
-    () =>
-      filteredJobs.filter(
-        (job) => isValidCoordinate(job.latitude) && isValidCoordinate(job.longitude)
-      ),
-    [filteredJobs]
-  );
+  const mappableJobs = useMemo(() => nearbyMapListings, [nearbyMapListings]);
+  const featuredSuggestedListings = useMemo(() => suggestedListings.slice(0, 4), [suggestedListings]);
   const mapRegion = useMemo(
     () =>
       buildMapRegion({
@@ -102,7 +120,7 @@ export default function MapBrowseScreen({ navigation }) {
         <View style={styles.mapHeader}>
           <View style={styles.mapCopy}>
             <Text style={styles.mapLabel}>Live map</Text>
-            <Text style={styles.mapHint}>Tap a blue pin to open the job.</Text>
+            <Text style={styles.mapHint}>Tap a pin to open the nearby listing.</Text>
           </View>
           <Pressable onPress={handleRecenter} style={styles.recenterChip}>
             <Text style={styles.recenterChipText}>
@@ -129,7 +147,13 @@ export default function MapBrowseScreen({ navigation }) {
                 onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: job.id })}
                 title={job.title}
               >
-                <View style={styles.markerBubble}>
+                <View
+                  style={[
+                    styles.markerBubble,
+                    getListingGroup(job) === 'item' && !isSellItemListing(job) && styles.markerBubbleRent,
+                    isSellItemListing(job) && styles.markerBubbleSell,
+                  ]}
+                >
                   <Text style={styles.markerPrice}>{formatJobPrice(job.price)}</Text>
                 </View>
               </Marker>
@@ -144,7 +168,7 @@ export default function MapBrowseScreen({ navigation }) {
 
           {!mappableJobs.length ? (
             <View style={styles.mapEmptyState}>
-              <Text style={styles.mapEmptyTitle}>No exact-address jobs yet</Text>
+              <Text style={styles.mapEmptyTitle}>No exact-address listings yet</Text>
               <Text style={styles.mapEmptyText}>
                 New posts with real addresses will appear here automatically.
               </Text>
@@ -155,7 +179,7 @@ export default function MapBrowseScreen({ navigation }) {
 
       <AppCard style={styles.bottomCard}>
         <View style={styles.bottomHeader}>
-          <Text style={styles.sectionTitle}>Pinned nearby jobs</Text>
+          <Text style={styles.sectionTitle}>Suggested nearby listings</Text>
           <Pressable onPress={() => navigation.navigate(DISCOVER_ROUTES.LIST)}>
             <Text style={styles.linkText}>Switch to list</Text>
           </Pressable>
@@ -164,17 +188,18 @@ export default function MapBrowseScreen({ navigation }) {
           <Text style={styles.messageText}>Loading map listings...</Text>
         ) : listingsNotice ? (
           <Text style={styles.messageText}>{listingsNotice}</Text>
-        ) : filteredJobs.length ? (
-          filteredJobs.map((job) => (
+        ) : featuredSuggestedListings.length ? (
+          featuredSuggestedListings.map((job) => (
             <MapJobRow
               job={job}
               key={job.id}
               onPress={() => navigation.navigate(ROOT_ROUTES.JOB_DETAIL, { jobId: job.id })}
+              reasonChips={job.suggestionReasons}
             />
           ))
         ) : (
           <>
-            <Text style={styles.messageText}>No jobs are available for this map view yet.</Text>
+            <Text style={styles.messageText}>No nearby listings are available for this map view yet.</Text>
             {hasActiveFilters ? (
               <AppButton
                 label="Reset filters"
@@ -293,6 +318,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  markerBubbleRent: {
+    backgroundColor: '#D97904',
+  },
+  markerBubbleSell: {
+    backgroundColor: '#23834C',
   },
   markerPrice: {
     color: colors.card,
